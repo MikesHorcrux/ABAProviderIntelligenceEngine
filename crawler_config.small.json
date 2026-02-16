@@ -1,0 +1,15 @@
+{
+  "userAgent": "Mozilla/5.0 (compatible; LunaLeadCrawler/2.0; +local)",
+  "timeoutSeconds": 6,
+  "maxRetries": 2,
+  "retryDelaySeconds": 1.0,
+  "crawlDelaySeconds": 0.25,
+  "maxDepth": 2,
+  "maxPagesPerDomain": 40,
+  "respectRobots": true,
+  "allowedSchemes": [
+    "http",
+    "https"
+  ],
+  "seedFile": "/Users/lunavanamburg/.openclaw/workspace/leads_engine/seeds_small.csv"
+}

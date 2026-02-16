@@ -1,0 +1,6 @@
+{
+  "timeoutSeconds": 2,
+  "maxRowsPerRun": 100,
+  "extraPaths": ["/about", "/about-us", "/team", "/leadership", "/contact", "/contact-us"],
+  "userAgent": "Mozilla/5.0 (compatible; LunaLeadEnricher/1.0; +local)"
+}
