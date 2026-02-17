@@ -12,6 +12,8 @@ Operational guide for setup, run, debug, and recovery of the V1 pipeline.
 - Crawl + enrich + postprocess: `./run_v4.sh`
 - Canonical ingest only: `PYTHONPATH=$PWD python3 jobs/ingest_sources.py`
 - Change report: `python3 jobs/export_changes.py`
+- Smoke checks: `./run_smoke_tests.sh`
+- Full acceptance pass: `./run_v1_acceptance.sh`
 - Log verification event:
   `python3 jobs/log_outreach_event.py --website curaleaf.com --channel email --outcome replied --notes "left voicemail"`
 
