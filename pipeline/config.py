@@ -31,6 +31,8 @@ class CrawlConfig:
     growth_max_pages_per_domain: int = 0
     growth_max_total_pages: int = 0
     growth_max_depth: int = 0
+    seed_failure_streak_limit: int = 3
+    seed_backoff_hours: int = 24
     cache_ttl_hours: int = 24
     per_domain_min_interval_seconds: float = 1.25
     extra_paths: list[str] = field(
@@ -75,6 +77,8 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
     cfg_path = Path(path or os.environ.get("CANNARADAR_CRAWLER_CONFIG") or DEFAULT_CONFIG_PATH)
     default_seed = os.environ.get("CANNARADAR_SEED_FILE", defaults.seed_file)
     discovery_seed = os.environ.get("CANNARADAR_DISCOVERY_FILE", defaults.discovery_seed_file)
+    seed_failure_streak_limit = os.environ.get("CANNARADAR_SEED_FAILURE_STREAK_LIMIT")
+    seed_backoff_hours = os.environ.get("CANNARADAR_SEED_BACKOFF_HOURS")
 
     if not cfg_path.exists():
         return CrawlConfig(seed_file=default_seed)
@@ -105,6 +109,8 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
         growth_max_pages_per_domain=int(data.get("growthMaxPagesPerDomain", defaults.growth_max_pages_per_domain)),
         growth_max_total_pages=int(data.get("growthMaxTotalPages", defaults.growth_max_total_pages)),
         growth_max_depth=int(data.get("growthMaxDepth", defaults.growth_max_depth)),
+        seed_failure_streak_limit=int(seed_failure_streak_limit or data.get("seedFailureStreakLimit", defaults.seed_failure_streak_limit)),
+        seed_backoff_hours=int(seed_backoff_hours or data.get("seedBackoffHours", defaults.seed_backoff_hours)),
         cache_ttl_hours=int(data.get("cacheTtlHours", defaults.cache_ttl_hours)),
         per_domain_min_interval_seconds=float(
             data.get("perDomainMinIntervalSeconds", defaults.per_domain_min_interval_seconds)

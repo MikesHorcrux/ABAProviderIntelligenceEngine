@@ -116,8 +116,8 @@ def run_fetch(
         job_pk = make_pk("job", [seed.website, job_id, str(len(discovered))])
         started_at = utcnow_iso()
         con.execute(
-            "INSERT OR REPLACE INTO crawl_jobs (crawl_job_pk, seed_name, seed_domain, status, mode, created_at, updated_at) VALUES (?,?,?,'running','seed',?,?)",
-            (job_pk, seed.name, start_domain, started_at, started_at),
+            "INSERT OR REPLACE INTO crawl_jobs (crawl_job_pk, seed_name, seed_domain, status, mode, last_status_code, started_at, completed_at, created_at, updated_at, deleted_at) VALUES (?,?,?,'running','seed',0,?,?,?,?,'')",
+            (job_pk, seed.name, start_domain, started_at, None, started_at, started_at),
         )
 
         rp = _read_robots(seed.website, cfg, cfg.user_agent)
@@ -144,6 +144,8 @@ def run_fetch(
 
         max_total = crawl_total
         total_fetched = 0
+        last_status = 0
+        has_success = False
 
         queue_depths: list[tuple[str, int]] = [(url, 0) for url in queue]
 
@@ -184,6 +186,7 @@ def run_fetch(
 
             payload_hash = _hash_content(html)
             fetched_at = utcnow_iso()
+            last_status = status
             con.execute(
                 "INSERT INTO crawl_results (crawl_result_pk, crawl_job_pk, requested_url, target_url, status_code, content_hash, content, fetched_at, error_message, created_at, updated_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -211,6 +214,7 @@ def run_fetch(
                     (status, fetched_at, job_pk),
                 )
                 continue
+            has_success = True
 
             result = FetchResult(
                 job_pk=job_pk,
@@ -250,7 +254,12 @@ def run_fetch(
                 seen_urls.add(next_url)
                 queue_depths.append((next_url, next_depth))
 
-        con.execute("UPDATE crawl_jobs SET status='completed', updated_at=? WHERE crawl_job_pk=?", (utcnow_iso(), job_pk))
+        completed_at = utcnow_iso()
+        final_status = "completed" if has_success else ("partial" if total_fetched else "empty")
+        con.execute(
+            "UPDATE crawl_jobs SET status=?, last_status_code=?, completed_at=?, updated_at=? WHERE crawl_job_pk=?",
+            (final_status, last_status, completed_at, completed_at, job_pk),
+        )
 
     con.commit()
     return discovered

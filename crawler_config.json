@@ -16,5 +16,7 @@
   "monitorMaxDepth": 1,
   "growthMaxPagesPerDomain": 40,
   "growthMaxTotalPages": 80,
-  "growthMaxDepth": 2
+  "growthMaxDepth": 2,
+  "seedFailureStreakLimit": 3,
+  "seedBackoffHours": 24
 }

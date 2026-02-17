@@ -61,6 +61,60 @@ class PipelineRunner:
             return str(p)
         return None
 
+    @staticmethod
+    def _parse_iso_datetime(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except Exception:
+            return None
+
+    def _is_seed_in_backoff(self, con: sqlite3.Connection, seed: DiscoverySeed) -> bool:
+        domain = normalize_domain(seed.website)
+        if not domain:
+            return False
+
+        failure_limit = int(self.config.seed_failure_streak_limit)
+        if failure_limit <= 0:
+            return False
+        cooldown_hours = max(0, int(self.config.seed_backoff_hours))
+        if cooldown_hours <= 0:
+            return False
+        failure_limit = max(1, failure_limit)
+
+        rows = con.execute(
+            """
+            SELECT cr.status_code, cr.fetched_at
+            FROM crawl_jobs cj
+            INNER JOIN crawl_results cr ON cr.crawl_job_pk = cj.crawl_job_pk
+            WHERE cj.seed_domain = ?
+            ORDER BY cr.fetched_at DESC
+            LIMIT ?
+            """,
+            (domain, failure_limit),
+        ).fetchall()
+        if not rows:
+            return False
+
+        consecutive_failures = 0
+        for row in rows:
+            if int(row["status_code"] or 0) == 200:
+                break
+            consecutive_failures += 1
+
+        if consecutive_failures < failure_limit:
+            return False
+
+        last_seen = self._parse_iso_datetime(rows[0]["fetched_at"])
+        if not last_seen:
+            return False
+
+        now = datetime.utcnow()
+        if now - last_seen < timedelta(hours=cooldown_hours):
+            return True
+        return False
+
     def _discovery_stage(self, seed_limit: int | None = None) -> list[DiscoverySeed]:
         sources: list[tuple[str, str, int]] = []
         main_path = self._resolve_seed_path(self.seeds_path)
@@ -70,10 +124,25 @@ class PipelineRunner:
         if discovery_path:
             sources.append((discovery_path, "discovery_file", 60))
 
+        con = connect_db(self.db_path, SCHEMA_PATH)
         items: list[DiscoverySeed] = []
         for path, source, priority in sources:
             batch = load_seeds(path, source=source, priority=priority)
-            items.extend(batch.seeds)
+            for seed in batch.seeds:
+                if self._is_seed_in_backoff(con, seed):
+                    self.logger.warning(
+                        "Seed in cooldown; skipping for now",
+                        extra={
+                            "job_id": self.job_id,
+                            "stage": "discovery",
+                            "seed_domain": normalize_domain(seed.website),
+                            "source": seed.source,
+                        },
+                    )
+                    self.metrics.inc("seeds_skipped_backoff")
+                    continue
+                items.append(seed)
+        con.close()
         return dedupe_seeds(items, limit=seed_limit or self.max_pages)
 
     def _monitoring_stage(self, stale_days: int | None, seed_limit: int | None = None) -> list[DiscoverySeed]:
@@ -83,16 +152,20 @@ class PipelineRunner:
         if stale_days <= 0:
             rows = con.execute(
                 """
-                SELECT canonical_name, website_domain, state
+                SELECT canonical_name, website_domain, state, fit_score, updated_at
                 FROM locations
                 WHERE COALESCE(deleted_at,'')=''
-                ORDER BY last_crawled_at ASC, updated_at DESC
+                ORDER BY
+                  CASE WHEN COALESCE(last_crawled_at, '') = '' THEN 0 ELSE 1 END,
+                  last_crawled_at ASC,
+                  fit_score DESC,
+                  updated_at DESC
                 """,
             ).fetchall()
         else:
             rows = con.execute(
                 """
-                SELECT canonical_name, website_domain, state, last_crawled_at
+                SELECT canonical_name, website_domain, state, fit_score, updated_at
                 FROM locations
                 WHERE COALESCE(deleted_at,'')=''
                   AND (
@@ -100,29 +173,43 @@ class PipelineRunner:
                     OR last_crawled_at = ''
                     OR date(last_crawled_at) <= date('now', ?)
                   )
-                ORDER BY last_crawled_at ASC, updated_at DESC
+                ORDER BY
+                  CASE WHEN COALESCE(last_crawled_at, '') = '' THEN 0 ELSE 1 END,
+                  last_crawled_at ASC,
+                  fit_score DESC,
+                  updated_at DESC
                 """,
                 (modifier,),
             ).fetchall()
-        con.close()
 
         items: list[DiscoverySeed] = []
         for row in rows:
             domain = (row["website_domain"] or "").strip().lower()
             if not domain:
                 continue
-            items.append(
-                DiscoverySeed(
-                    name=(row["canonical_name"] or "").strip(),
-                    website=normalize_url(f"https://{domain}"),
-                    state=(row["state"] or "").strip(),
-                    market="",
-                    source="monitor_seed",
-                    priority=40,
-                )
+            candidate = DiscoverySeed(
+                name=(row["canonical_name"] or "").strip(),
+                website=normalize_url(f"https://{domain}"),
+                state=(row["state"] or "").strip(),
+                market="",
+                source="monitor_seed",
+                priority=40 + min(50, int((row["fit_score"] or 0) / 2)),
             )
+            if self._is_seed_in_backoff(con, candidate):
+                self.logger.warning(
+                    "Monitor seed in cooldown; skipping for now",
+                    extra={
+                        "job_id": self.job_id,
+                        "stage": "monitor",
+                        "seed_domain": candidate.website,
+                    },
+                )
+                self.metrics.inc("seeds_skipped_backoff")
+                continue
+            items.append(candidate)
             if seed_limit and len(items) >= seed_limit:
                 break
+        con.close()
         return dedupe_seeds(items)
 
     def _seed_signature(self, seed: DiscoverySeed) -> tuple[str, str]:
@@ -144,7 +231,7 @@ class PipelineRunner:
         combined_monitoring: list[DiscoverySeed] = []
 
         if crawl_mode in {"balanced", "full", "hybrid"}:
-            for seed in discovery_seeds + monitoring_seeds:
+            for seed in sorted(discovery_seeds + monitoring_seeds, key=lambda x: x.priority, reverse=True):
                 key = self._seed_signature(seed)
                 if key in seen:
                     continue

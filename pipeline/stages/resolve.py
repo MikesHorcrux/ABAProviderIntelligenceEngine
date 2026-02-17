@@ -143,10 +143,11 @@ def resolve_and_upsert_locations(
                 website_domain = COALESCE(NULLIF(?, ''), website_domain),
                 state = COALESCE(NULLIF(?, ''), state),
                 last_seen_at = ?,
+                last_crawled_at = ?,
                 updated_at = ?
             WHERE location_pk = ?
             """,
-            (seed.name, domain, seed.state, now, now, location_pk),
+            (seed.name, domain, seed.state, now, now, now, location_pk),
         )
 
         if domain:
@@ -217,7 +218,7 @@ def resolve_and_upsert_locations(
             domain,
             "",
             0,
-            None,
+            now,
             now,
             now,
             now,
