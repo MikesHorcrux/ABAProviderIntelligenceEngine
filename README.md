@@ -44,6 +44,7 @@ CannaRadar is built as that engine.
 
 ### Docs
 - `CANNARADAR_FULL_BUILD_SPEC.md` — full build blueprint and continuity plan
+- `docs/RUNBOOK_V1.md` — setup/run/debug/recovery operations runbook
 - `CANNARADAR_V2_IDEAS.md` — post-V1 roadmap
 - `README_V4.md` — prior v4 notes
 
@@ -60,6 +61,12 @@ To include canonical ingest before pipeline:
 
 ```bash
 ./run_v1_features.sh
+```
+
+Run smoke checks:
+
+```bash
+./run_smoke_tests.sh
 ```
 
 ---
