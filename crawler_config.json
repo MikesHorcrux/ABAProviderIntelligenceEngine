@@ -17,6 +17,13 @@
   "growthMaxPagesPerDomain": 40,
   "growthMaxTotalPages": 80,
   "growthMaxDepth": 2,
+  "weeklyNewLeadTarget": 100,
+  "growthWindowDays": 7,
+  "enforceGrowthGovernor": true,
+  "retryBaseDelaySeconds": 1.25,
+  "retryFactor": 1.9,
+  "requireFetchSuccessGate": true,
+  "outputStaleHours": 72,
   "seedFailureStreakLimit": 3,
   "seedBackoffHours": 24
 }

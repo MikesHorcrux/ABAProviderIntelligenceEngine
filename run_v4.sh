@@ -22,6 +22,10 @@ CRAWL_MONITOR_MAX_TOTAL="${CANNARADAR_MONITOR_MAX_TOTAL_PAGES:-}"
 CRAWL_MONITOR_MAX_DEPTH="${CANNARADAR_MONITOR_MAX_DEPTH:-}"
 CRAWL_SEED_FAILURE_STREAK_LIMIT="${CANNARADAR_SEED_FAILURE_STREAK_LIMIT:-}"
 CRAWL_SEED_BACKOFF_HOURS="${CANNARADAR_SEED_BACKOFF_HOURS:-}"
+CRAWL_WEEKLY_NEW_LEAD_TARGET="${CANNARADAR_WEEKLY_NEW_LEAD_TARGET:-}"
+CRAWL_GROWTH_WINDOW_DAYS="${CANNARADAR_GROWTH_WINDOW_DAYS:-}"
+CRAWL_GOVERNOR_SWITCH="${CANNARADAR_ENFORCE_GROWTH_GOVERNOR:-}"
+CRAWL_REQUIRE_FETCH_SUCCESS_GATE="${CANNARADAR_REQUIRE_FETCH_SUCCESS_GATE:-}"
 
 mkdir -p "$OUT_DIR" "$STATE_DIR"
 
@@ -130,6 +134,18 @@ fi
 if [ -n "$CRAWL_SEED_BACKOFF_HOURS" ]; then
   export CANNARADAR_SEED_BACKOFF_HOURS="$CRAWL_SEED_BACKOFF_HOURS"
 fi
+if [ -n "$CRAWL_WEEKLY_NEW_LEAD_TARGET" ]; then
+  export CANNARADAR_WEEKLY_NEW_LEAD_TARGET="$CRAWL_WEEKLY_NEW_LEAD_TARGET"
+fi
+if [ -n "$CRAWL_GROWTH_WINDOW_DAYS" ]; then
+  export CANNARADAR_GROWTH_WINDOW_DAYS="$CRAWL_GROWTH_WINDOW_DAYS"
+fi
+if [ -n "$CRAWL_GOVERNOR_SWITCH" ]; then
+  export CANNARADAR_ENFORCE_GROWTH_GOVERNOR="$CRAWL_GOVERNOR_SWITCH"
+fi
+if [ -n "$CRAWL_REQUIRE_FETCH_SUCCESS_GATE" ]; then
+  export CANNARADAR_REQUIRE_FETCH_SUCCESS_GATE="$CRAWL_REQUIRE_FETCH_SUCCESS_GATE"
+fi
 
 python3 cannaradar_cli.py crawl:run --seeds "$seed_file" "${crawl_args[@]}" --export-tier A --export-limit 200
 python3 jobs/export_changes.py --run-id "$RUN_ID"
@@ -160,6 +176,13 @@ def latest(prefix):
     candidates = sorted(out.glob(f'{prefix}*.csv'))
     return candidates[-1] if candidates else None
 
+def merge_governor(source, destination):
+    governor = source.get("growth_governor") or {}
+    destination["growth_governor"] = governor
+    for key in ["governor"]:
+        if key in source and key not in destination:
+            destination[key] = source[key]
+
 run_payload = {
     'run_id': '$RUN_ID',
     'pipeline_mode': '$CRAWL_MODE',
@@ -179,6 +202,17 @@ run_payload = {
     },
     'config_sha': sha(Path('$CRAWLER_CONFIG')),
 }
+
+pipeline_manifest = {}
+manifest = base / 'data' / 'state' / 'last_run_manifest.json'
+if manifest.exists():
+    try:
+        pipeline_manifest = json.loads(manifest.read_text())
+    except Exception:
+        pipeline_manifest = {}
+    if isinstance(pipeline_manifest, dict):
+        merge_governor(pipeline_manifest, run_payload)
+
 manifest = base / 'data' / 'state' / 'last_run_manifest.json'
 manifest.write_text(json.dumps(run_payload, indent=2))
 print(json.dumps(run_payload, indent=2))

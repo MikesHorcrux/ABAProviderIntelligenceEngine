@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable
 from datetime import datetime, timedelta
+from typing import Iterable
 
 import sqlite3
 
@@ -66,9 +66,43 @@ class PipelineRunner:
         if not value:
             return None
         try:
-            return datetime.fromisoformat(value)
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                return datetime.fromisoformat(value)
+            except Exception:
+                return None
+
+    def _load_last_manifest(self) -> dict[str, object] | None:
+        if not MANIFEST_PATH.exists():
+            return None
+        try:
+            payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
         except Exception:
             return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _previous_run_started_at(self) -> str | None:
+        payload = self._load_last_manifest()
+        if not payload:
+            return None
+        started_at = payload.get("started_at_utc")
+        if isinstance(started_at, str) and started_at.strip():
+            return started_at.strip()
+        return None
+
+    def _governor_observed_count_from_manifest(self) -> int:
+        payload = self._load_last_manifest()
+        if not payload:
+            return 0
+        governor = payload.get("growth_governor")
+        if isinstance(governor, dict):
+            value = governor.get("observed_new_leads")
+            if isinstance(value, int):
+                return value
+        return 0
 
     def _is_seed_in_backoff(self, con: sqlite3.Connection, seed: DiscoverySeed) -> bool:
         domain = normalize_domain(seed.website)
@@ -83,6 +117,26 @@ class PipelineRunner:
             return False
         failure_limit = max(1, failure_limit)
 
+        try:
+            row = con.execute(
+                "SELECT consecutive_failures, last_failure_at FROM seed_telemetry WHERE seed_domain = ?",
+                (domain,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = None
+
+        if row:
+            consecutive_failures = int(row["consecutive_failures"] or 0)
+            if consecutive_failures < failure_limit:
+                return False
+            last_failure = self._parse_iso_datetime(row["last_failure_at"])
+            if not last_failure:
+                return False
+            if datetime.utcnow() - last_failure.replace(tzinfo=None) < timedelta(hours=cooldown_hours):
+                return True
+            return False
+
+        # Backward-compatible fallback if telemetry table is not present yet.
         rows = con.execute(
             """
             SELECT cr.status_code, cr.fetched_at
@@ -110,10 +164,7 @@ class PipelineRunner:
         if not last_seen:
             return False
 
-        now = datetime.utcnow()
-        if now - last_seen < timedelta(hours=cooldown_hours):
-            return True
-        return False
+        return datetime.utcnow() - last_seen.replace(tzinfo=None) < timedelta(hours=cooldown_hours)
 
     def _discovery_stage(self, seed_limit: int | None = None) -> list[DiscoverySeed]:
         sources: list[tuple[str, str, int]] = []
@@ -143,7 +194,8 @@ class PipelineRunner:
                     continue
                 items.append(seed)
         con.close()
-        return dedupe_seeds(items, limit=seed_limit or self.max_pages)
+        dedupe_limit = self.max_pages if seed_limit is None else seed_limit
+        return dedupe_seeds(items, limit=dedupe_limit)
 
     def _monitoring_stage(self, stale_days: int | None, seed_limit: int | None = None) -> list[DiscoverySeed]:
         stale_days = max(0, int(stale_days or self.config.monitor_stale_days))
@@ -248,42 +300,80 @@ class PipelineRunner:
 
         return discovery_seeds, monitoring_seeds
 
-    def _previous_run_started_at(self) -> str | None:
-        if not MANIFEST_PATH.exists():
-            return None
-        try:
-            payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return None
-        started_at = payload.get("started_at_utc")
-        if isinstance(started_at, str) and started_at.strip():
-            return started_at.strip()
-        return None
+    def _growth_governor(self, con: sqlite3.Connection, crawl_mode: str, requested_discovery_limit: int | None) -> dict[str, object]:
+        crawl_mode = (crawl_mode or "full").lower()
+        target = max(0, int(self.config.weekly_new_lead_target))
+        window_days = max(1, int(self.config.growth_window_days))
+        manifest_count = self._governor_observed_count_from_manifest()
 
-    def run_fetch(
-        self,
-        seeds: list[DiscoverySeed] | None = None,
-        max_pages_per_domain: int | None = None,
-        max_total_pages: int | None = None,
-        max_depth: int | None = None,
-    ) -> list[FetchResult]:
-        seeds = seeds or self._discovery_stage()
-        start = log_stage_start(self.logger, "fetch", self.job_id)
-        con = connect_db(self.db_path, SCHEMA_PATH)
-        fetched = run_fetch(
-            con,
-            seeds,
-            self.config,
-            self.logger,
-            self.metrics,
-            self.job_id,
-            max_pages_per_domain=max_pages_per_domain,
-            max_total_pages=max_total_pages,
-            max_depth=max_depth,
-        )
-        log_stage_end(self.logger, "fetch", self.job_id, start, self.metrics.snapshot())
-        con.close()
-        return fetched
+        observed_db = 0
+        if crawl_mode != "monitor":
+            cutoff = (datetime.utcnow() - timedelta(days=window_days)).isoformat(timespec="seconds")
+            observed_db = int(
+                con.execute(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM locations
+                    WHERE COALESCE(deleted_at,'')=''
+                      AND created_at >= ?
+                    """,
+                    (cutoff,),
+                ).fetchone()["c"]
+            )
+
+        observed = max(manifest_count, observed_db)
+        shortfall = max(0, target - observed) if self.config.enforce_growth_governor and crawl_mode != "monitor" else 0
+        headroom = shortfall if target else 0
+
+        governor_mode = "disabled"
+        discovery_limit = requested_discovery_limit
+        if crawl_mode == "monitor":
+            governor_mode = "monitor_only"
+        elif requested_discovery_limit and requested_discovery_limit > 0:
+            governor_mode = "manual"
+        elif self.config.enforce_growth_governor and target:
+            discovery_limit = headroom
+            governor_mode = "auto"
+
+        return {
+            "enabled": self.config.enforce_growth_governor,
+            "mode": governor_mode,
+            "target": target,
+            "window_days": window_days,
+            "observed_new_leads": observed,
+            "manifest_observed_new_leads": manifest_count,
+            "db_observed_new_leads": observed_db,
+            "shortfall": shortfall,
+            "remaining": headroom,
+            "requested_discovery_limit": requested_discovery_limit or 0,
+            "discovery_limit": discovery_limit,
+        }
+
+    def _run_reliability_gate(self, con: sqlite3.Connection, *, total_seeds: int, fetch_successes: int) -> dict[str, object]:
+        if total_seeds == 0:
+            return {"passed": True, "failed": False, "reason": "no_seeds"}
+        if fetch_successes > 0:
+            return {"passed": True, "failed": False, "reason": ""}
+        cutoff = datetime.utcnow() - timedelta(hours=max(0, int(self.config.output_stale_hours)))
+        row = con.execute(
+            "SELECT MAX(last_seen_at) AS last_seen_at FROM locations WHERE COALESCE(deleted_at,'')=''",
+        ).fetchone()
+        last_seen = self._parse_iso_datetime(row["last_seen_at"] if row else None)
+        if not last_seen:
+            return {
+                "passed": False,
+                "failed": True,
+                "reason": "no_seen_locations_for_reliability_gate",
+                "last_seen_at": "",
+            }
+        if datetime.utcnow() - last_seen.replace(tzinfo=None) > cutoff:
+            return {
+                "passed": False,
+                "failed": True,
+                "reason": "no_fetch_success_and_output_stale",
+                "last_seen_at": last_seen.isoformat(),
+            }
+        return {"passed": True, "failed": False, "reason": ""}
 
     def _load_results_for_enrichment(self, since: str | None = None) -> list[FetchResult]:
         con = connect_db(self.db_path, SCHEMA_PATH)
@@ -334,6 +424,31 @@ class PipelineRunner:
                 )
             )
         return output
+
+    def run_fetch(
+        self,
+        seeds: list[DiscoverySeed] | None = None,
+        max_pages_per_domain: int | None = None,
+        max_total_pages: int | None = None,
+        max_depth: int | None = None,
+    ) -> list[FetchResult]:
+        seeds = seeds or self._discovery_stage()
+        start = log_stage_start(self.logger, "fetch", self.job_id)
+        con = connect_db(self.db_path, SCHEMA_PATH)
+        fetched = run_fetch(
+            con,
+            seeds,
+            self.config,
+            self.logger,
+            self.metrics,
+            self.job_id,
+            max_pages_per_domain=max_pages_per_domain,
+            max_total_pages=max_total_pages,
+            max_depth=max_depth,
+        )
+        log_stage_end(self.logger, "fetch", self.job_id, start, self.metrics.snapshot())
+        con.close()
+        return fetched
 
     def run_enrich(self, fetched: list[FetchResult] | None = None, since: str | None = None) -> list[str]:
         start = log_stage_start(self.logger, "enrich", self.job_id)
@@ -487,9 +602,9 @@ class PipelineRunner:
                             provider,
                             item.target_url,
                             "menu provider detected from page",
-                        now,
-                    ),
-                )
+                            now,
+                        ),
+                    )
 
             for social_url in parsed.social_urls[:3]:
                 con.execute(
@@ -651,6 +766,12 @@ class PipelineRunner:
         con.close()
         return payload
 
+    def _write_last_run_manifest(self, payload: dict[str, object]) -> None:
+        MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        base = self._load_last_manifest() or {}
+        base.update(payload)
+        MANIFEST_PATH.write_text(json.dumps(base, indent=2), encoding="utf-8")
+
     def run_crawl(
         self,
         seed_limit: int | None = None,
@@ -665,15 +786,31 @@ class PipelineRunner:
         monitor_max_total: int | None = None,
         monitor_max_depth: int | None = None,
     ) -> dict[str, object]:
+        started_at = utcnow_iso()
         self.max_pages = seed_limit or self.max_pages
-        growth_limit = discovery_limit or self.max_pages
+        requested_limit = discovery_limit or self.max_pages
+        growth_limit = self.max_pages
+
+        con = connect_db(self.db_path, SCHEMA_PATH)
+        governor = self._growth_governor(
+            con,
+            crawl_mode=crawl_mode,
+            requested_discovery_limit=requested_limit,
+        )
+        con.close()
+
+        discovery_limit = governor.get("discovery_limit")
+        if requested_limit is not None and discovery_limit is not None:
+            discovery_limit = min(requested_limit, discovery_limit)
+        if discovery_limit is None and isinstance(growth_limit, int):
+            discovery_limit = growth_limit
         discovery_seeds, monitoring_seeds = self._build_seed_plan(
             crawl_mode=crawl_mode,
-            discovery_limit=growth_limit,
+            discovery_limit=discovery_limit,
             monitor_limit=monitor_limit,
             stale_days=stale_days,
         )
-
+        total_seeds = len(discovery_seeds) + len(monitoring_seeds)
         fetched: list[FetchResult] = []
         if discovery_seeds:
             fetched.extend(
@@ -695,18 +832,80 @@ class PipelineRunner:
             )
 
         if discovery_seeds or monitoring_seeds:
-            self.run_enrich(fetched=fetched)
-            self.run_score()
-        if not discovery_seeds and not monitoring_seeds:
-            self.metrics.inc("no_seeds")
-            return {"outreach": "", "research": "", "merge_suggestions": "", "quality": {}, "new_leads": "", "buying_signal_watchlist": ""}
+            if fetched:
+                self.run_enrich(fetched=fetched)
+                self.run_score()
+            con = connect_db(self.db_path, SCHEMA_PATH)
+            reliability = self._run_reliability_gate(
+                con,
+                total_seeds=total_seeds,
+                fetch_successes=len(fetched),
+            )
+            con.close()
 
-        previous_run = self._previous_run_started_at()
-        if previous_run:
-            # Keep output window focused on changes since last successful run.
-            last_week_cutoff = previous_run
-        else:
-            last_week_cutoff = (datetime.now() - timedelta(days=7)).isoformat(timespec="seconds")
+            if not reliability["passed"] and self.config.require_fetch_success_gate:
+                report = {
+                    "outreach": "",
+                    "research": "",
+                    "merge_suggestions": "",
+                    "quality": {},
+                    "new_leads": "",
+                    "buying_signal_watchlist": "",
+                    "status": "failed",
+                    "reliability_gate": reliability,
+                    "growth_governor": governor,
+                    "started_at_utc": started_at,
+                    "completed_at_utc": utcnow_iso(),
+                    "crawl_mode": crawl_mode,
+                    "seed_counts": {"discovery": len(discovery_seeds), "monitor": len(monitoring_seeds)},
+                    "seed_limit": discovery_limit,
+                }
+                self._write_last_run_manifest(report)
+                raise RuntimeError(f"Reliability gate failed: {reliability['reason']}")
 
-        report = self.run_export(tier="A", limit=200, research_limit=200, since=last_week_cutoff, new_limit=100, signal_limit=200)
+            previous_run = self._previous_run_started_at()
+            if previous_run:
+                last_week_cutoff = previous_run
+            else:
+                last_week_cutoff = (datetime.now() - timedelta(days=7)).isoformat(timespec="seconds")
+
+            report = self.run_export(
+                tier="A",
+                limit=200,
+                research_limit=200,
+                since=last_week_cutoff,
+                new_limit=100,
+                signal_limit=200,
+            )
+            report.update(
+                {
+                    "status": "passed" if reliability["passed"] else "degraded",
+                    "reliability_gate": reliability,
+                    "growth_governor": governor,
+                    "started_at_utc": started_at,
+                    "completed_at_utc": utcnow_iso(),
+                    "crawl_mode": crawl_mode,
+                    "seed_counts": {"discovery": len(discovery_seeds), "monitor": len(monitoring_seeds)},
+                }
+            )
+            self._write_last_run_manifest(report)
+            return report
+
+        self.metrics.inc("no_seeds")
+        report = {
+            "outreach": "",
+            "research": "",
+            "merge_suggestions": "",
+            "quality": {},
+            "new_leads": "",
+            "buying_signal_watchlist": "",
+            "status": "no_work",
+            "growth_governor": governor,
+            "started_at_utc": started_at,
+            "completed_at_utc": utcnow_iso(),
+            "crawl_mode": crawl_mode,
+            "seed_counts": {"discovery": 0, "monitor": 0},
+            "reliability_gate": {"passed": True, "failed": False, "reason": "no_seeds"},
+        }
+        self._write_last_run_manifest(report)
         return report

@@ -35,6 +35,32 @@ def _hash_content(html: str) -> str:
     return hashlib.sha256(html.encode("utf-8", errors="ignore")).hexdigest()
 
 
+def _status_class(status: int | None) -> str:
+    if not status:
+        return "network_error"
+    if 200 <= status < 300:
+        return "success"
+    if status == 429:
+        return "throttle"
+    if 300 <= status <= 399:
+        return "redirect"
+    if 500 <= status <= 599:
+        return "server_error"
+    if 400 <= status <= 499:
+        return "client_error"
+    return "unknown_error"
+
+
+def _retry_wait_seconds(base_delay: float, attempt: int, status_class: str, cfg: CrawlConfig) -> float:
+    if status_class in {"client_error", "redirect"}:
+        return min(base_delay * 0.75, cfg.retry_delay_seconds)
+    return base_delay * (cfg.retry_factor ** attempt)
+
+
+def _is_retryable(status_class: str) -> bool:
+    return status_class in {"server_error", "throttle", "network_error", "unknown_error"}
+
+
 def _read_robots(base: str, cfg: CrawlConfig, user_agent: str) -> robotparser.RobotFileParser | None:
     if not cfg.respect_robots:
         return None
@@ -87,6 +113,85 @@ def _already_fetched_recently(con: sqlite3.Connection, normalized_url: str, cfg:
         (normalized_url, cutoff),
     ).fetchone()
     return row is not None
+
+
+def _upsert_seed_telemetry(
+    con: sqlite3.Connection,
+    *,
+    seed_domain: str,
+    seed_name: str,
+    run_job_pk: str,
+    run_started_at: str,
+    run_completed_at: str,
+    run_status: str,
+    last_status_code: int,
+    run_attempts: int,
+    run_success_pages: int,
+    run_failure_pages: int,
+    run_pages_fetched: int,
+) -> None:
+    con.execute(
+        """
+        INSERT INTO seed_telemetry (
+            seed_domain, seed_name, attempts, successes, failures,
+            success_runs, failure_runs, consecutive_failures, last_status_code,
+            last_success_at, last_failure_at, last_run_started_at, last_run_completed_at,
+            last_run_status, last_run_pages_fetched, last_run_success_pages, last_run_failure_pages,
+            last_run_job_pk, created_at, updated_at, deleted_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(seed_domain) DO UPDATE SET
+            seed_name = excluded.seed_name,
+            attempts = attempts + excluded.attempts,
+            successes = successes + excluded.successes,
+            failures = failures + excluded.failures,
+            success_runs = success_runs + excluded.success_runs,
+            failure_runs = failure_runs + excluded.failure_runs,
+            consecutive_failures = CASE
+                WHEN excluded.successes > 0 THEN 0
+                ELSE consecutive_failures + excluded.failure_runs
+            END,
+            last_status_code = excluded.last_status_code,
+            last_success_at = CASE
+                WHEN excluded.last_success_at <> '' THEN excluded.last_success_at
+                ELSE last_success_at
+            END,
+            last_failure_at = CASE
+                WHEN excluded.last_failure_at <> '' THEN excluded.last_failure_at
+                ELSE last_failure_at
+            END,
+            last_run_started_at = excluded.last_run_started_at,
+            last_run_completed_at = excluded.last_run_completed_at,
+            last_run_status = excluded.last_run_status,
+            last_run_pages_fetched = excluded.last_run_pages_fetched,
+            last_run_success_pages = excluded.last_run_success_pages,
+            last_run_failure_pages = excluded.last_run_failure_pages,
+            last_run_job_pk = excluded.last_run_job_pk,
+            updated_at = excluded.updated_at
+        """,
+        (
+            seed_domain,
+            seed_name,
+            run_attempts,
+            run_success_pages,
+            run_failure_pages,
+            1 if run_success_pages > 0 else 0,
+            1 if run_status in {"partial", "empty", "failed"} else 0,
+            0,
+            last_status_code,
+            run_completed_at if run_success_pages > 0 else "",
+            run_completed_at if run_status in {"partial", "empty", "failed"} else "",
+            run_started_at,
+            run_completed_at,
+            run_status,
+            run_pages_fetched,
+            run_success_pages,
+            run_failure_pages,
+            run_job_pk,
+            run_completed_at,
+            run_completed_at,
+            "",
+        ),
+    )
 
 
 def run_fetch(
@@ -144,8 +249,12 @@ def run_fetch(
 
         max_total = crawl_total
         total_fetched = 0
-        last_status = 0
         has_success = False
+
+        run_attempts = 0
+        run_success_pages = 0
+        run_failure_pages = 0
+        run_pages_fetched = 0
 
         queue_depths: list[tuple[str, int]] = [(url, 0) for url in queue]
 
@@ -170,23 +279,42 @@ def run_fetch(
 
             status = 0
             html = ""
+            last_error = "non-200"
             for attempt in range(cfg.max_retries + 1):
+                run_attempts += 1
                 try:
                     status, html = _fetch_once(normalized, cfg)
-                    break
-                except (HTTPError, URLError, TimeoutError):
-                    metrics.inc("fetch_retries")
-                    if attempt >= cfg.max_retries:
-                        html = ""
+                    status_class = _status_class(status)
+                    last_error = "" if status_class == "success" else status_class
+                    if status_class == "success":
                         break
-                    time.sleep(cfg.retry_delay_seconds)
-                except Exception:
-                    html = ""
+                    if not _is_retryable(status_class):
+                        break
+                except HTTPError as exc:
+                    status = int(exc.code or 0)
+                    status_class = _status_class(status)
+                    last_error = str(exc)
+                    if not _is_retryable(status_class):
+                        break
+                except (URLError, TimeoutError) as exc:
+                    status = 0
+                    status_class = _status_class(status)
+                    last_error = str(exc)
+                    if not _is_retryable(status_class):
+                        break
+                except Exception as exc:
+                    status = 0
+                    status_class = "unknown_error"
+                    last_error = str(exc)
                     break
+
+                if attempt >= cfg.max_retries:
+                    break
+                metrics.inc(f"fetch_retries_{status_class}")
+                time.sleep(_retry_wait_seconds(cfg.retry_base_delay_seconds, attempt, status_class, cfg))
 
             payload_hash = _hash_content(html)
             fetched_at = utcnow_iso()
-            last_status = status
             con.execute(
                 "INSERT INTO crawl_results (crawl_result_pk, crawl_job_pk, requested_url, target_url, status_code, content_hash, content, fetched_at, error_message, created_at, updated_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -199,7 +327,7 @@ def run_fetch(
                     payload_hash,
                     html,
                     fetched_at,
-                    "" if status == 200 else "non-200",
+                    "" if status == 200 else last_error,
                     fetched_at,
                     fetched_at,
                 ),
@@ -207,6 +335,13 @@ def run_fetch(
             metrics.inc("pages_fetched")
             total_fetched += 1
             pages_left -= 1
+            run_pages_fetched = total_fetched
+
+            if status == 200 and html:
+                run_success_pages += 1
+                has_success = True
+            else:
+                run_failure_pages += 1
 
             if status != 200 or not html:
                 con.execute(
@@ -214,7 +349,6 @@ def run_fetch(
                     (status, fetched_at, job_pk),
                 )
                 continue
-            has_success = True
 
             result = FetchResult(
                 job_pk=job_pk,
@@ -258,7 +392,21 @@ def run_fetch(
         final_status = "completed" if has_success else ("partial" if total_fetched else "empty")
         con.execute(
             "UPDATE crawl_jobs SET status=?, last_status_code=?, completed_at=?, updated_at=? WHERE crawl_job_pk=?",
-            (final_status, last_status, completed_at, completed_at, job_pk),
+            (final_status, status, completed_at, completed_at, job_pk),
+        )
+        _upsert_seed_telemetry(
+            con,
+            seed_domain=start_domain,
+            seed_name=seed.name,
+            run_job_pk=job_pk,
+            run_started_at=started_at,
+            run_completed_at=completed_at,
+            run_status=final_status,
+            last_status_code=status,
+            run_attempts=run_attempts,
+            run_success_pages=run_success_pages,
+            run_failure_pages=run_failure_pages,
+            run_pages_fetched=run_pages_fetched,
         )
 
     con.commit()

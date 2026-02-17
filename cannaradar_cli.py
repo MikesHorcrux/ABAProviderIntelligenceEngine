@@ -28,6 +28,10 @@ def make_parser() -> argparse.ArgumentParser:
     crawl.add_argument("--monitor-max-depth", type=int, default=None)
     crawl.add_argument("--export-tier", default="A")
     crawl.add_argument("--export-limit", type=int, default=200)
+    crawl.add_argument("--weekly-lead-target", type=int, default=None)
+    crawl.add_argument("--growth-window-days", type=int, default=None)
+    crawl.add_argument("--growth-governor", type=str, default=None, choices=["on", "off"])
+    crawl.add_argument("--enforce-fetch-gate", type=str, default=None, choices=["on", "off"])
 
     enrich = sub.add_parser("enrich:run", help="Re-run enrichment stage (from crawl results)")
     enrich.add_argument("--since", default=None, help='ISO timestamp, e.g. "2026-02-17T00:00:00"')
@@ -61,6 +65,14 @@ def main() -> None:
     runner = PipelineRunner(db_path=args.db)
     if args.command == "crawl:run":
         runner.max_pages = args.max
+        if args.weekly_lead_target is not None:
+            runner.config.weekly_new_lead_target = args.weekly_lead_target
+        if args.growth_window_days is not None:
+            runner.config.growth_window_days = args.growth_window_days
+        if args.growth_governor is not None:
+            runner.config.enforce_growth_governor = args.growth_governor == "on"
+        if args.enforce_fetch_gate is not None:
+            runner.config.require_fetch_success_gate = args.enforce_fetch_gate == "on"
         result = runner.run_crawl(
             seed_limit=args.max,
             crawl_mode=args.crawl_mode,
