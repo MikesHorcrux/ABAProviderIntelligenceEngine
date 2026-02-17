@@ -234,7 +234,6 @@ def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_i
 
     outreach_rows: list[dict] = []
     excluded_rows: list[dict] = []
-    all_rows: list[dict] = []
 
     for row in rows:
         loc_pk = row["location_pk"]
@@ -265,7 +264,6 @@ def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_i
             "state": row["state"] or "",
         }
 
-        all_rows.append(record)
         if segment == "dispensary" and tier_order.get(current_tier, 1) >= min_tier:
             outreach_rows.append(record)
         else:
@@ -310,7 +308,7 @@ def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_i
     with legacy_out.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=legacy_fields)
         writer.writeheader()
-        for row in all_rows:
+        for row in outreach_rows:
             writer.writerow(
                 {
                     "dispensary": row["company_name"],
