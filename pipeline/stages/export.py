@@ -46,7 +46,7 @@ def _best_contact(con, location_pk: str) -> tuple[str, str, str]:
         """
         SELECT full_name, role, email
         FROM contacts
-        WHERE location_pk = ? AND deleted_at IS NULL
+        WHERE location_pk = ? AND COALESCE(deleted_at,'')=''
         ORDER BY confidence DESC, updated_at DESC
         LIMIT 1
         """,
@@ -108,7 +108,7 @@ def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_i
     excluded_out = out_dir / "excluded_non_dispensary.csv"
 
     rows = con.execute(
-        "SELECT location_pk, canonical_name, website_domain, state FROM locations WHERE deleted_at IS NULL ORDER BY fit_score DESC, updated_at DESC"
+        "SELECT location_pk, canonical_name, website_domain, state FROM locations WHERE COALESCE(deleted_at,'')='' ORDER BY fit_score DESC, updated_at DESC"
     ).fetchall()
     tier_order = {"A": 3, "B": 2, "C": 1}
     min_tier = tier_order.get(tier, 3)
@@ -253,7 +253,7 @@ def export_research_queue(con, out_dir: Path, limit: int = 200, run_id: str = ""
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "research_queue.csv"
     rows = con.execute(
-        "SELECT location_pk, canonical_name, website_domain FROM locations WHERE deleted_at IS NULL ORDER BY fit_score DESC",
+        "SELECT location_pk, canonical_name, website_domain FROM locations WHERE COALESCE(deleted_at,'')='' ORDER BY fit_score DESC",
     ).fetchall()
     candidates: list[dict] = []
     for row in rows:
@@ -262,7 +262,7 @@ def export_research_queue(con, out_dir: Path, limit: int = 200, run_id: str = ""
             """
             SELECT 1 FROM contacts
             WHERE location_pk = ?
-              AND deleted_at IS NULL
+              AND COALESCE(deleted_at,'')=''
               AND (
                 lower(role) LIKE '%buyer%'
                 OR lower(role) LIKE '%purchasing%'
