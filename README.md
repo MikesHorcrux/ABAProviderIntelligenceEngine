@@ -69,6 +69,12 @@ Run smoke checks:
 ./run_smoke_tests.sh
 ```
 
+Run end-to-end V1 acceptance pass:
+
+```bash
+./run_v1_acceptance.sh
+```
+
 ---
 
 ## Outputs
