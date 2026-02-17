@@ -96,6 +96,9 @@ def run_fetch(
     logger,
     metrics,
     job_id: str,
+    max_pages_per_domain: int | None = None,
+    max_total_pages: int | None = None,
+    max_depth: int | None = None,
 ) -> list[FetchResult]:
     denylist = {d for d in cfg.merged_denylist() if d}
     discovered: list[FetchResult] = []
@@ -122,17 +125,30 @@ def run_fetch(
         seen_urls = {seed.website}
         pages_left = cfg.max_pages_per_domain if cfg.max_pages_per_domain > 0 else 30
         extra_paths = list(cfg.extra_paths)
+        crawl_pages = max_pages_per_domain if max_pages_per_domain and max_pages_per_domain > 0 else cfg.max_pages_per_domain
+        crawl_pages = crawl_pages if crawl_pages > 0 else 30
+        crawl_total = (
+            max_total_pages
+            if max_total_pages and max_total_pages > 0
+            else (cfg.max_total_pages if cfg.max_total_pages and cfg.max_total_pages > 0 else crawl_pages)
+        )
+        crawl_depth = max_depth if max_depth is not None and max_depth >= 0 else cfg.max_depth
+        crawl_depth = min(max(crawl_depth, 0), 10)
+
+        pages_left = crawl_pages
         for path in extra_paths:
             candidate = normalize_url(f"{seed.website.rstrip('/')}{path}")
             if candidate not in seen_urls:
                 queue.append(candidate)
                 seen_urls.add(candidate)
 
-        max_total = cfg.max_total_pages if cfg.max_total_pages and cfg.max_total_pages > 0 else (cfg.max_pages_per_domain or 30)
+        max_total = crawl_total
         total_fetched = 0
 
-        while queue and total_fetched < max_total and pages_left > 0:
-            url = queue.pop(0)
+        queue_depths: list[tuple[str, int]] = [(url, 0) for url in queue]
+
+        while queue_depths and total_fetched < max_total and pages_left > 0:
+            url, depth = queue_depths.pop(0)
             if not _can_fetch(rp, url, cfg.user_agent):
                 logger.warning("Robots blocked", extra={"job_id": job_id, "stage": stage, "url": url})
                 continue
@@ -226,10 +242,13 @@ def run_fetch(
                     continue
                 if next_url in seen_urls:
                     continue
-                if len(seen_urls) > cfg.max_pages_per_domain * 2:
+                next_depth = depth + 1
+                if next_depth > crawl_depth:
+                    continue
+                if len(seen_urls) > crawl_pages * 2:
                     continue
                 seen_urls.add(next_url)
-                queue.append(next_url)
+                queue_depths.append((next_url, next_depth))
 
         con.execute("UPDATE crawl_jobs SET status='completed', updated_at=? WHERE crawl_job_pk=?", (utcnow_iso(), job_pk))
 

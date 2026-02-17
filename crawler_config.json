@@ -8,5 +8,13 @@
   "maxPagesPerDomain": 40,
   "respectRobots": true,
   "allowedSchemes": ["http", "https"],
-  "seedFile": "seeds.csv"
+  "seedFile": "seeds.csv",
+  "discoverySeedFile": "discoveries.csv",
+  "monitorStaleDays": 30,
+  "monitorMaxPagesPerDomain": 12,
+  "monitorMaxTotalPages": 24,
+  "monitorMaxDepth": 1,
+  "growthMaxPagesPerDomain": 40,
+  "growthMaxTotalPages": 80,
+  "growthMaxDepth": 2
 }

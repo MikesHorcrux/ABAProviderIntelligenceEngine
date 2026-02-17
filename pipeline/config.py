@@ -23,6 +23,14 @@ class CrawlConfig:
     allowed_schemes: list[str] = field(default_factory=lambda: ["http", "https"])
     denylist: list[str] = field(default_factory=list)
     seed_file: str = "seeds.csv"
+    discovery_seed_file: str = "discoveries.csv"
+    monitor_stale_days: int = 30
+    monitor_max_pages_per_domain: int = 12
+    monitor_max_total_pages: int = 24
+    monitor_max_depth: int = 1
+    growth_max_pages_per_domain: int = 0
+    growth_max_total_pages: int = 0
+    growth_max_depth: int = 0
     cache_ttl_hours: int = 24
     per_domain_min_interval_seconds: float = 1.25
     extra_paths: list[str] = field(
@@ -66,6 +74,7 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
     defaults = CrawlConfig()
     cfg_path = Path(path or os.environ.get("CANNARADAR_CRAWLER_CONFIG") or DEFAULT_CONFIG_PATH)
     default_seed = os.environ.get("CANNARADAR_SEED_FILE", defaults.seed_file)
+    discovery_seed = os.environ.get("CANNARADAR_DISCOVERY_FILE", defaults.discovery_seed_file)
 
     if not cfg_path.exists():
         return CrawlConfig(seed_file=default_seed)
@@ -86,6 +95,16 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
         allowed_schemes=_coalesce_list(data.get("allowedSchemes"), defaults.allowed_schemes),
         denylist=_coalesce_list(data.get("denylist"), defaults.denylist),
         seed_file=str(data.get("seedFile", default_seed)),
+        discovery_seed_file=str(data.get("discoverySeedFile", discovery_seed)),
+        monitor_stale_days=int(data.get("monitorStaleDays", defaults.monitor_stale_days)),
+        monitor_max_pages_per_domain=int(
+            data.get("monitorMaxPagesPerDomain", defaults.monitor_max_pages_per_domain)
+        ),
+        monitor_max_total_pages=int(data.get("monitorMaxTotalPages", defaults.monitor_max_total_pages)),
+        monitor_max_depth=int(data.get("monitorMaxDepth", defaults.monitor_max_depth)),
+        growth_max_pages_per_domain=int(data.get("growthMaxPagesPerDomain", defaults.growth_max_pages_per_domain)),
+        growth_max_total_pages=int(data.get("growthMaxTotalPages", defaults.growth_max_total_pages)),
+        growth_max_depth=int(data.get("growthMaxDepth", defaults.growth_max_depth)),
         cache_ttl_hours=int(data.get("cacheTtlHours", defaults.cache_ttl_hours)),
         per_domain_min_interval_seconds=float(
             data.get("perDomainMinIntervalSeconds", defaults.per_domain_min_interval_seconds)
@@ -97,4 +116,7 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
 
 
 def discover_seed_paths(cfg: CrawlConfig) -> list[str]:
-    return [cfg.seed_file]
+    paths = [cfg.seed_file]
+    if cfg.discovery_seed_file:
+        paths.append(cfg.discovery_seed_file)
+    return paths

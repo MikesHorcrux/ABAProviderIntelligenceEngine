@@ -14,15 +14,23 @@ class DiscoverySeed:
     website: str
     state: str
     market: str
+    source: str = "seed_file"
+    priority: int = 0
 
 
 @dataclass(frozen=True)
 class DiscoveryBatch:
     seeds: tuple[DiscoverySeed, ...]
     total: int
+    source: str = "seed_file"
 
 
-def load_seeds(path: str) -> DiscoveryBatch:
+def load_seeds(
+    path: str,
+    *,
+    source: str = "seed_file",
+    priority: int = 0,
+) -> DiscoveryBatch:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(path)
@@ -40,8 +48,17 @@ def load_seeds(path: str) -> DiscoveryBatch:
         if key in seen:
             continue
         seen.add(key)
-        items.append(DiscoverySeed(name=name, website=website, state=state, market=market))
-    return DiscoveryBatch(seeds=tuple(items), total=len(items))
+        items.append(
+            DiscoverySeed(
+                name=name,
+                website=website,
+                state=state,
+                market=market,
+                source=source,
+                priority=priority,
+            )
+        )
+    return DiscoveryBatch(seeds=tuple(items), total=len(items), source=source)
 
 
 def dedupe_seeds(seeds: Iterable[DiscoverySeed], limit: int | None = None) -> list[DiscoverySeed]:

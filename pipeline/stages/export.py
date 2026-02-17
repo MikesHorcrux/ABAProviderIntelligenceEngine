@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pipeline.utils import utcnow_iso
@@ -87,6 +87,59 @@ def _proof_urls(con, location_pk: str) -> str:
         (location_pk,),
     ).fetchall()
     return "; ".join(sorted({r["source_url"] for r in rows}))
+
+
+def _has_buyer_contact(con, location_pk: str) -> bool:
+    row = con.execute(
+        """
+        SELECT 1
+        FROM contacts
+        WHERE location_pk=?
+          AND COALESCE(deleted_at,'')=''
+          AND (
+            lower(role) LIKE '%buyer%'
+            OR lower(role) LIKE '%purchasing%'
+            OR lower(role) LIKE '%inventory%'
+            OR lower(role) LIKE '%owner%'
+            OR lower(role) LIKE '%operations%'
+          )
+        LIMIT 1
+        """,
+        (location_pk,),
+    ).fetchone()
+    return row is not None
+
+
+def _has_direct_email(con, location_pk: str) -> bool:
+    row = con.execute(
+        """
+        SELECT 1
+        FROM contact_points
+        WHERE location_pk=?
+          AND type='email'
+          AND value<>''
+          AND COALESCE(deleted_at,'')=''
+        LIMIT 1
+        """,
+        (location_pk,),
+    ).fetchone()
+    return row is not None
+
+
+def _has_direct_phone(con, location_pk: str) -> bool:
+    row = con.execute(
+        """
+        SELECT 1
+        FROM contact_points
+        WHERE location_pk=?
+          AND type='phone'
+          AND value<>''
+          AND COALESCE(deleted_at,'')=''
+        LIMIT 1
+        """,
+        (location_pk,),
+    ).fetchone()
+    return row is not None
 
 
 def _active_score(con, loc_pk: str) -> tuple[int, str]:
@@ -329,4 +382,139 @@ def export_merge_suggestions(con, out_dir: Path, run_id: str = "") -> str:
         writer.writeheader()
         for row in rows:
             writer.writerow(dict(row))
+    return str(path)
+
+
+def export_new_leads(
+    con,
+    out_dir: Path,
+    since: str | None = None,
+    limit: int = 100,
+    run_id: str = "",
+) -> str:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = out_dir / f"new_leads_since_run_{run_id}.csv"
+    cutoff = since or (datetime.now() - timedelta(days=7)).isoformat(timespec="seconds")
+    rows = con.execute(
+        """
+        SELECT location_pk, canonical_name, website_domain, state, created_at, last_crawled_at
+        FROM locations
+        WHERE COALESCE(deleted_at,'')=''
+          AND created_at >= ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (cutoff, limit),
+    ).fetchall()
+
+    fields = [
+        "company_name",
+        "website",
+        "state",
+        "created_at",
+        "last_crawled_at",
+        "contact_name",
+        "contact_title",
+        "email",
+        "phone",
+        "score",
+        "tier",
+        "menu_provider",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            loc_pk = row["location_pk"]
+            score, tier = _active_score(con, loc_pk)
+            contact_name, contact_title, contact_email = _best_contact(con, loc_pk)
+            writer.writerow(
+                {
+                    "company_name": row["canonical_name"] or "",
+                    "website": row["website_domain"] or "",
+                    "state": row["state"] or "",
+                    "created_at": row["created_at"] or "",
+                    "last_crawled_at": row["last_crawled_at"] or "",
+                    "contact_name": contact_name,
+                    "contact_title": contact_title,
+                    "email": contact_email,
+                    "phone": _best_phone(con, loc_pk),
+                    "score": str(score),
+                    "tier": tier,
+                    "menu_provider": _menu_provider_for_location(con, loc_pk),
+                }
+            )
+    return str(path)
+
+
+def export_buyer_signal_queue(
+    con,
+    out_dir: Path,
+    since: str | None = None,
+    limit: int = 200,
+    run_id: str = "",
+) -> str:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = out_dir / f"buying_signal_watchlist_{run_id}.csv"
+    cutoff = since or (datetime.now() - timedelta(days=7)).isoformat(timespec="seconds")
+    rows = con.execute(
+        """
+        SELECT location_pk, canonical_name, website_domain, state, updated_at, fit_score
+        FROM locations
+        WHERE COALESCE(deleted_at,'')=''
+          AND fit_score >= 72
+          AND (updated_at >= ? OR last_seen_at >= ?)
+        ORDER BY fit_score DESC, updated_at DESC
+        LIMIT ?
+        """,
+        (cutoff, cutoff, limit),
+    ).fetchall()
+
+    fields = [
+        "company_name",
+        "website",
+        "state",
+        "score",
+        "segment",
+        "has_buyer_contact",
+        "has_direct_email",
+        "has_direct_phone",
+        "contact_name",
+        "contact_title",
+        "email",
+        "phone",
+        "recommended_action",
+        "updated_at",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            loc_pk = row["location_pk"]
+            has_buyer_contact = _has_buyer_contact(con, loc_pk)
+            has_email = _has_direct_email(con, loc_pk)
+            has_phone = _has_direct_phone(con, loc_pk)
+            contact_name, contact_title, contact_email = _best_contact(con, loc_pk)
+            if not (has_buyer_contact or has_email or has_phone):
+                continue
+            writer.writerow(
+                {
+                    "company_name": row["canonical_name"] or "",
+                    "website": row["website_domain"] or "",
+                    "state": row["state"] or "",
+                    "score": str(int(row["fit_score"] or 0)),
+                    "segment": _segment_company(row["canonical_name"] or "", row["website_domain"] or "")[0],
+                    "has_buyer_contact": str(has_buyer_contact).lower(),
+                    "has_direct_email": str(has_email).lower(),
+                    "has_direct_phone": str(has_phone).lower(),
+                    "contact_name": contact_name,
+                    "contact_title": contact_title,
+                    "email": contact_email,
+                    "phone": _best_phone(con, loc_pk),
+                    "recommended_action": "Priority outreach target. Verify buyer role then send buying intent message.",
+                    "updated_at": row["updated_at"] or "",
+                }
+            )
     return str(path)
