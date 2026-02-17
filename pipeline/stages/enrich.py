@@ -41,7 +41,7 @@ def run_waterfall_enrichment(con, location_pk: str) -> None:
         (location_pk,),
     ).fetchone()
     person = con.execute(
-        "SELECT full_name, role FROM contacts WHERE location_pk=? AND deleted_at IS NULL ORDER BY confidence DESC, updated_at DESC LIMIT 1",
+        "SELECT full_name, role FROM contacts WHERE location_pk=? AND COALESCE(deleted_at,'')='' ORDER BY confidence DESC, updated_at DESC LIMIT 1",
         (location_pk,),
     ).fetchone()
 

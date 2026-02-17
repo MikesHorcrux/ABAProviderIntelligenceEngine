@@ -82,7 +82,7 @@ def _parse_tier_chain(signal: str) -> bool:
 def run_score(con):
     now = utcnow_iso()
     rows = con.execute(
-        "SELECT location_pk, canonical_name, website_domain, fit_score, state FROM locations WHERE deleted_at IS NULL"
+        "SELECT location_pk, canonical_name, website_domain, fit_score, state FROM locations WHERE COALESCE(deleted_at,'')=''"
     ).fetchall()
     for row in rows:
         loc_pk = row["location_pk"]
@@ -97,7 +97,7 @@ def run_score(con):
             (loc_pk,),
         ).fetchone()
         contacts = con.execute(
-            "SELECT full_name, role FROM contacts WHERE location_pk=? AND deleted_at IS NULL AND full_name<>''",
+            "SELECT full_name, role FROM contacts WHERE location_pk=? AND COALESCE(deleted_at,'')='' AND full_name<>''",
             (loc_pk,),
         ).fetchall()
 
@@ -112,7 +112,7 @@ def run_score(con):
 
         org_pk = con.execute("SELECT org_pk FROM locations WHERE location_pk=?", (loc_pk,)).fetchone()["org_pk"]
         location_count = con.execute(
-            "SELECT COUNT(*) AS c FROM locations WHERE org_pk=? AND deleted_at IS NULL",
+            "SELECT COUNT(*) AS c FROM locations WHERE org_pk=? AND COALESCE(deleted_at,'')=''",
             (org_pk,),
         ).fetchone()["c"]
 
