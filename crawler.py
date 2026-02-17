@@ -5,7 +5,7 @@ from urllib.request import Request, urlopen
 from pathlib import Path
 from datetime import datetime
 
-BASE = Path('/Users/lunavanamburg/.openclaw/workspace/leads_engine')
+BASE = Path(__file__).resolve().parent
 SEEDS = BASE / 'seeds.csv'
 DB = BASE / 'data/leads.db'
 OUT = BASE / 'out/verified_leads.csv'

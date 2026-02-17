@@ -5,7 +5,7 @@ from datetime import datetime
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
-BASE = Path('/Users/lunavanamburg/.openclaw/workspace/leads_engine')
+BASE = Path(__file__).resolve().parent
 OUT = BASE / 'out'
 RAW = OUT / 'raw_leads.csv'
 DB = BASE / 'data/leads_v2.db'

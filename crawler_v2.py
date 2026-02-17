@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from urllib import robotparser
 
-BASE = Path('/Users/lunavanamburg/.openclaw/workspace/leads_engine')
+BASE = Path(__file__).resolve().parent
 CFG_PATH = BASE / 'crawler_config.json'
 SEEDS_PATH = BASE / 'seeds.csv'
 DB_PATH = BASE / 'data/leads_v2.db'
