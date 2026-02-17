@@ -195,16 +195,16 @@ def resolve_and_upsert_locations(
         """
         INSERT OR REPLACE INTO companies
         (company_pk, organization_pk, legal_name, dba_name, state, created_at, updated_at, last_seen_at, deleted_at)
-        VALUES (?,?,?,?,?,?,?, '')
+        VALUES (?,?,?,?,?,?,?,?,?)
         """,
-        (company_pk, org_pk, seed.name or "Unknown", seed.name or "Unknown", seed.state, now, now, now),
+        (company_pk, org_pk, seed.name or "Unknown", seed.name or "Unknown", seed.state, now, now, now, ""),
     )
     location_pk = make_pk("loc", [seed.name, domain, seed.state])
     con.execute(
         """
         INSERT OR REPLACE INTO locations
         (location_pk, org_pk, canonical_name, address_1, city, state, zip, website_domain, phone, fit_score, last_crawled_at, created_at, updated_at, last_seen_at, deleted_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'')
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             location_pk,
@@ -221,7 +221,8 @@ def resolve_and_upsert_locations(
             now,
             now,
             now,
+            "",
         ),
-        )
+    )
     _upsert_domain(con, location_pk, domain, seed.website, now)
-    return ResolvedLocation(company_pk=org_pk, location_pk=location_pk, domain=domain, segment="unknown", merge_suggestions=0)
+    return ResolvedLocation(company_pk=company_pk, location_pk=location_pk, domain=domain, segment="unknown", merge_suggestions=0)

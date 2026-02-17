@@ -63,8 +63,9 @@ def _coalesce_list(value: object, default: list[str]) -> list[str]:
 
 
 def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
+    defaults = CrawlConfig()
     cfg_path = Path(path or os.environ.get("CANNARADAR_CRAWLER_CONFIG") or DEFAULT_CONFIG_PATH)
-    default_seed = os.environ.get("CANNARADAR_SEED_FILE", CrawlConfig.seed_file)
+    default_seed = os.environ.get("CANNARADAR_SEED_FILE", defaults.seed_file)
 
     if not cfg_path.exists():
         return CrawlConfig(seed_file=default_seed)
@@ -73,25 +74,25 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
         data = json.loads(f.read())
 
     return CrawlConfig(
-        user_agent=str(data.get("userAgent", CrawlConfig.user_agent)),
-        timeout_seconds=float(data.get("timeoutSeconds", CrawlConfig.timeout_seconds)),
-        max_retries=int(data.get("maxRetries", CrawlConfig.max_retries)),
-        retry_delay_seconds=float(data.get("retryDelaySeconds", CrawlConfig.retry_delay_seconds)),
-        crawl_delay_seconds=float(data.get("crawlDelaySeconds", CrawlConfig.crawl_delay_seconds)),
-        max_depth=int(data.get("maxDepth", CrawlConfig.max_depth)),
-        max_pages_per_domain=int(data.get("maxPagesPerDomain", CrawlConfig.max_pages_per_domain)),
+        user_agent=str(data.get("userAgent", defaults.user_agent)),
+        timeout_seconds=float(data.get("timeoutSeconds", defaults.timeout_seconds)),
+        max_retries=int(data.get("maxRetries", defaults.max_retries)),
+        retry_delay_seconds=float(data.get("retryDelaySeconds", defaults.retry_delay_seconds)),
+        crawl_delay_seconds=float(data.get("crawlDelaySeconds", defaults.crawl_delay_seconds)),
+        max_depth=int(data.get("maxDepth", defaults.max_depth)),
+        max_pages_per_domain=int(data.get("maxPagesPerDomain", defaults.max_pages_per_domain)),
         max_total_pages=data.get("maxTotalPages"),
-        respect_robots=bool(data.get("respectRobots", CrawlConfig.respect_robots)),
-        allowed_schemes=_coalesce_list(data.get("allowedSchemes"), CrawlConfig.allowed_schemes),
-        denylist=_coalesce_list(data.get("denylist"), CrawlConfig.denylist),
+        respect_robots=bool(data.get("respectRobots", defaults.respect_robots)),
+        allowed_schemes=_coalesce_list(data.get("allowedSchemes"), defaults.allowed_schemes),
+        denylist=_coalesce_list(data.get("denylist"), defaults.denylist),
         seed_file=str(data.get("seedFile", default_seed)),
-        cache_ttl_hours=int(data.get("cacheTtlHours", CrawlConfig.cache_ttl_hours)),
+        cache_ttl_hours=int(data.get("cacheTtlHours", defaults.cache_ttl_hours)),
         per_domain_min_interval_seconds=float(
-            data.get("perDomainMinIntervalSeconds", CrawlConfig.per_domain_min_interval_seconds)
+            data.get("perDomainMinIntervalSeconds", defaults.per_domain_min_interval_seconds)
         ),
-        extra_paths=_coalesce_list(data.get("extraPaths"), CrawlConfig.extra_paths),
-        role_keywords=_coalesce_list(data.get("roleKeywords"), CrawlConfig.role_keywords),
-        max_concurrency=max(1, int(data.get("maxConcurrency", CrawlConfig.max_concurrency))),
+        extra_paths=_coalesce_list(data.get("extraPaths"), defaults.extra_paths),
+        role_keywords=_coalesce_list(data.get("roleKeywords"), defaults.role_keywords),
+        max_concurrency=max(1, int(data.get("maxConcurrency", defaults.max_concurrency))),
     )
 
 

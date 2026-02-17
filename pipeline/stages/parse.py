@@ -17,12 +17,14 @@ SCHEMA_ORG_RE = re.compile(r"\"@type\"\s*:\s*\"?LocalBusiness\"?.{0,4000}?\"?add
 MENU_PROVIDER_PATTERNS = {
     "dutchie": re.compile(r"dutchie", re.I),
     "weedmaps": re.compile(r"weedmaps", re.I),
-    "jane": re.compile(r"\bJane\b", re.I),
+    # Avoid false positives from person names like "Jane Smith".
+    "jane": re.compile(r"\bjaneapp\b|iheartjane", re.I),
     "greenbits": re.compile(r"greenbits", re.I),
     "flowhub": re.compile(r"flowhub", re.I),
 }
 ROLE_KW_RE = re.compile(r"\b(owner|gm|general manager|buyer|purchasing|inventory manager|chief operating officer|operations|director of operations)\b", re.I)
 NAME_ROLE_RE = re.compile(r"([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3})[\s\S]{0,80}\b(owner|gm|general manager|buyer|purchasing|inventory manager)\b", re.I)
+ROLE_NAME_RE = re.compile(r"\b(?i:owner|gm|general manager|buyer|purchasing|inventory manager)\b[\s:,-]{0,8}([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3})")
 
 
 @dataclass(frozen=True)
@@ -45,32 +47,43 @@ def extract_links(url: str, html: str) -> list[str]:
 
 def _extract_contacts(text: str, page_url: str) -> list[tuple[str, str, str]]:
     out: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
     for m in NAME_ROLE_RE.finditer(text):
         name = m.group(1).strip()
         role = m.group(2).strip().lower()
         if len(name.split()) < 2:
             continue
+        key = (name.lower(), role)
+        if key in seen:
+            continue
+        seen.add(key)
         out.append((name, role, extract_snippet(text, m.start(), m.end())))
+
+    for m in ROLE_NAME_RE.finditer(text):
+        role = 'owner'
+        name = m.group(1).strip()
+        if len(name.split()) < 2:
+            continue
+        key = (name.lower(), role)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((name, role, extract_snippet(text, m.start(), m.end())))
+
     return out
 
 
 def _extract_social_links(html: str) -> list[str]:
     out = set[str]()
-    lowered = html.lower()
-    for domain in ("instagram.com", "facebook.com", "x.com", "twitter.com", "tiktok.com", "youtube.com"):
-        start = 0
-        token = domain
-        while True:
-            idx = lowered.find(token, start)
-            if idx < 0:
-                break
-            left = max(0, idx - 90)
-            right = min(len(html), idx + 180)
-            context = html[left:right]
-            m = SRCSET_RE.search(context)
-            if m and m.group(0).startswith("http"):
-                out.add(m.group(0))
-            start = idx + 1
+    social_domains = ("instagram.com", "facebook.com", "x.com", "twitter.com", "tiktok.com", "youtube.com")
+    for href in HREF_RE.findall(html or ""):
+        h = href.strip()
+        if not h.startswith("http"):
+            continue
+        lowered = h.lower()
+        if any(d in lowered for d in social_domains):
+            out.add(h)
     return sorted(out)
 
 
@@ -128,8 +141,9 @@ def parse_page(url: str, html: str) -> ParsedPage:
     schema_org = _extract_schema_org_address(text)
     links = extract_links(url, html)
     providers: list[str] = []
+    searchable = f"{text}\n{html or ''}"
     for name, pat in MENU_PROVIDER_PATTERNS.items():
-        if pat.search(text):
+        if pat.search(searchable):
             providers.append(name)
 
     return ParsedPage(

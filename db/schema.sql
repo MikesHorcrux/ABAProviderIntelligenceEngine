@@ -74,7 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_locations_state ON locations(state);
 CREATE INDEX IF NOT EXISTS idx_locations_website_domain ON locations(website_domain);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_org_name ON locations(org_pk, canonical_name, state, COALESCE(NULLIF(website_domain, ''), '<no_domain>'));
 CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_website_domain_phone ON locations(COALESCE(NULLIF(website_domain, ''), '<no_domain>'), COALESCE(NULLIF(phone, ''), '<no_phone>'), state);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_address ON locations(COALESCE(NULLIF(address_1, ''), '<no_address>'), city, state, zip;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_address ON locations(org_pk, COALESCE(NULLIF(address_1, ''), '<no_address>'), city, state, zip);
 
 CREATE TABLE IF NOT EXISTS domains (
   domain_pk TEXT PRIMARY KEY NOT NULL,

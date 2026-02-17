@@ -290,7 +290,6 @@ def main():
         name = r.get('dispensary') or r.get('name') or ''
         website = (r.get('website') or '').strip()
         source_url = r.get('source_url') or ''
-        segment = classify_segment(name, website, source_url)
         owner = clean_owner(r.get('owner_name') or '')
         role = r.get('owner_role') or ''
         email = r.get('email') or ''
