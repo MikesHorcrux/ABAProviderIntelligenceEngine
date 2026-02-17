@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import csv
 import sqlite3
 import tempfile
@@ -22,8 +23,24 @@ def test_schema_tables():
         con = sqlite3.connect(db)
         con.executescript(SCHEMA.read_text())
         tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-        required = {'organizations', 'licenses', 'locations', 'contact_points', 'evidence', 'outreach_events'}
+        required = {'organizations', 'licenses', 'locations', 'contact_points', 'evidence', 'outreach_events', 'schema_migrations'}
         assert_true(required.issubset(tables), f'missing tables: {required - tables}')
+        con.close()
+
+
+def test_schema_migration_metadata():
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / 'test.db'
+        con = sqlite3.connect(db)
+        con.executescript(SCHEMA.read_text())
+        user_version = int(con.execute('PRAGMA user_version').fetchone()[0])
+        assert_true(user_version == 4, f'expected schema user_version=4, got {user_version}')
+        row = con.execute('SELECT schema_checksum FROM schema_migrations WHERE schema_version=?', (4,)).fetchone()
+        checksum = hashlib.sha256(SCHEMA.read_text().encode('utf-8')).hexdigest()
+        assert_true(
+            row is None or row[0] == checksum,
+            f'schema_migrations checksum mismatch: expected {checksum}, got {row[0] if row else "MISSING"}',
+        )
         con.close()
 
 
@@ -101,7 +118,11 @@ def test_excluded_output_guard():
 
 def main():
     test_schema_tables()
+    test_schema_migration_metadata()
     test_export_schema_contract()
+    test_change_metrics_and_manifests()
+    test_excluded_output_guard()
+    test_foreign_key_enforcement()
     print('smoke_v1: ok')
 
 

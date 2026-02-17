@@ -14,6 +14,20 @@ from adapters.base import LicenseRow
 BASE = Path(__file__).resolve().parents[1]
 DB = BASE / 'data/cannaradar_v1.db'
 SCHEMA = BASE / 'db/schema.sql'
+SCHEMA_TEXT = SCHEMA.read_text()
+SCHEMA_VERSION = 4
+SCHEMA_MIGRATION_NAME = 'v1.5.0'
+SCHEMA_CHECKSUM = hashlib.sha256(SCHEMA_TEXT.encode('utf-8')).hexdigest()
+
+REQUIRED_TABLE_COLUMNS = {
+    'organizations': {'org_pk', 'legal_name', 'dba_name', 'state', 'created_at', 'updated_at'},
+    'licenses': {'license_pk', 'org_pk', 'state', 'license_id', 'license_type', 'status', 'source_url', 'retrieved_at', 'fingerprint'},
+    'locations': {'location_pk', 'org_pk', 'canonical_name', 'address_1', 'city', 'state', 'zip', 'website_domain', 'phone', 'fit_score', 'last_crawled_at', 'created_at', 'updated_at'},
+    'contact_points': {'contact_pk', 'location_pk', 'type', 'value', 'confidence', 'source_url', 'first_seen_at', 'last_seen_at'},
+    'evidence': {'evidence_pk', 'entity_type', 'entity_pk', 'field_name', 'field_value', 'source_url', 'snippet', 'captured_at'},
+    'outreach_events': {'event_pk', 'location_pk', 'channel', 'outcome', 'notes', 'created_at'},
+    'schema_migrations': {'schema_version', 'migration_name', 'schema_checksum', 'applied_at'},
+}
 
 
 def make_pk(prefix: str, parts: list[str]) -> str:
@@ -37,8 +51,46 @@ def normalized_domain(url_or_domain: str) -> str:
         return ''
 
 
+def assert_schema_layout(con: sqlite3.Connection):
+    for table, required_columns in REQUIRED_TABLE_COLUMNS.items():
+        cols = {r[1] for r in con.execute(f'PRAGMA table_info({table})').fetchall()}
+        missing = required_columns - cols
+        if missing:
+            raise SystemExit(f'Schema drift detected for {table}. Missing columns: {", ".join(sorted(missing))}')
+
+
+def assert_schema_migration(con: sqlite3.Connection):
+    current_version = int((con.execute('PRAGMA user_version').fetchone() or [0])[0])
+    if current_version != SCHEMA_VERSION:
+        raise SystemExit(
+            f'Schema version mismatch for canonical DB. Expected {SCHEMA_VERSION}, found {current_version}. '
+            'Run jobs/ingest_sources.py against a supported schema DB backup/restore path and re-run.'
+        )
+
+    row = con.execute(
+        'SELECT migration_name, schema_checksum FROM schema_migrations WHERE schema_version=?',
+        (SCHEMA_VERSION,),
+    ).fetchone()
+
+    if not row:
+        con.execute(
+            'INSERT INTO schema_migrations (schema_version, migration_name, schema_checksum, applied_at) VALUES (?,?,?,?)',
+            (SCHEMA_VERSION, SCHEMA_MIGRATION_NAME, SCHEMA_CHECKSUM, datetime.now().isoformat(timespec='seconds')),
+        )
+        return
+
+    if row[1] != SCHEMA_CHECKSUM:
+        raise SystemExit(
+            f'Schema checksum mismatch for version {SCHEMA_VERSION}. '
+            f'Expected {SCHEMA_CHECKSUM}, found {row[1]}. '
+            'Use a known-good DB backup or rebuild schema from seed source before continuing.'
+        )
+
+
 def init_db(con: sqlite3.Connection):
-    con.executescript(SCHEMA.read_text())
+    con.executescript(SCHEMA_TEXT)
+    assert_schema_layout(con)
+    assert_schema_migration(con)
     con.commit()
 
 

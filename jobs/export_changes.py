@@ -74,8 +74,9 @@ def main():
         print(f'Initialized baseline snapshot -> {previous_path}')
 
     now = datetime.now().strftime('%Y%m%d-%H%M%S')
-    diff_path = out_dir / f'changes_{run_id}_{now}.csv'
-    summary_path = out_dir / f'changes_{run_id}_{now}.txt'
+    run_key = run_id.strip().replace(' ', '_') or now
+    diff_path = out_dir / f'changes_{run_key}.csv'
+    summary_path = out_dir / f'changes_{run_key}.txt'
 
     current = load_csv(snapshot_path)
     previous = load_csv(previous_path)

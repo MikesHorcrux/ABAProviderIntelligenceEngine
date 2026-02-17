@@ -1,5 +1,6 @@
 -- CannaRadar V1 canonical schema
 PRAGMA foreign_keys = ON;
+PRAGMA user_version = 4;
 
 CREATE TABLE IF NOT EXISTS organizations (
   org_pk TEXT PRIMARY KEY NOT NULL,
@@ -97,3 +98,10 @@ CREATE TABLE IF NOT EXISTS outreach_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_outreach_events_location_pk ON outreach_events(location_pk);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  schema_version INTEGER PRIMARY KEY,
+  migration_name TEXT NOT NULL,
+  schema_checksum TEXT NOT NULL,
+  applied_at TEXT NOT NULL
+);
