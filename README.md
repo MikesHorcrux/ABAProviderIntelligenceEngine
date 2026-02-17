@@ -53,7 +53,7 @@ flowchart TD
 - `cannaradar_cli.py`: command interface.
 - `run_v4.sh`: safe scheduled runner.
 - `docs/RUNBOOK_V1.md`: operator runbook.
-- `README_V4.md`: AI-agent operating reference.
+- `README_AI_AGENTS.md`: AI-agent operating reference.
 
 ## Command surface
 
