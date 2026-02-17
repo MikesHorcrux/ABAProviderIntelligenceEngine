@@ -1,47 +1,82 @@
-# Leads Engine V4 (Local, Zero-Budget)
+# CannaRadar V4 / V1.5 Pipeline Notes
 
-Purpose: continuously generate dispensary-focused outreach leads every few hours, while excluding non-dispensary entities from the active outreach list.
+This stack is now aligned to a production-oriented, evidence-driven lead pipeline:
 
-## Pipeline
+- Crawl only allowed public pages (robots-aware)
+- Preserve source provenance on key fields
+- Resolve duplicates deterministically
+- Score and rank leads for outreach actionability
+- Export clean dispensary-only outreach lists and research queues
 
-1. `crawler_v2.py` — discovers + crawls seed domains
-2. `enrich.py` — pulls extra contact/owner signals from common pages
-3. `postprocess_v4.py` — segments rows (`dispensary` vs non-dispensary), adds `segment_confidence` and `segment_reason`
-4. `brief.py` — creates `out/morning_brief.txt`
-5. `jobs/export_changes.py` — computes run-to-run diffs and writes `out/changes_<run-id>.csv`
-6. `run_v4.sh` — writes `data/state/last_run_manifest.json` and enforces run locks
+## Primary pipeline
 
-Run all:
+1. `python3 cannaradar_cli.py crawl:run --seeds seeds.csv`  
+   Runs discovery → fetch → parse/extract → enrichment → scoring → exports.
+2. `python3 cannaradar_cli.py enrich:run --since <ISO_TIMESTAMP>`  
+   Re-run enrichment only for recent crawl results.
+3. `python3 cannaradar_cli.py score:run`  
+   Recompute lead scoring and feature vectors.
+4. `python3 cannaradar_cli.py export:outreach --tier A --limit 200`
+5. `python3 cannaradar_cli.py export:research --limit 200`
+6. `python3 cannaradar_cli.py quality:report`
+7. `python3 jobs/export_changes.py --run-id <YYYYMMDD-HHMMSS>`
+8. `PYTHONPATH=$PWD python3 jobs/ingest_sources.py` for canonical ingest/migrations
+
+## Outputs
+
+- `out/outreach_ready_<YYYYMMDD-HHMMSS>.csv` (new production-ready outreach format)
+- `out/outreach_dispensary_100.csv` (legacy compatibility alias)
+- `out/excluded_non_dispensary.csv`
+- `out/research_queue.csv`
+- `out/merge_suggestions_<YYYYMMDD-HHMMSS>.csv`
+- `out/v4_quality_report.txt` + `out/quality_report.json`
+- `out/changes_<YYYYMMDD-HHMMSS>.csv` + `out/changes_<YYYYMMDD-HHMMSS>.txt`
+- `data/state/last_run_manifest.json`
+- `data/state/last_change_metrics.json`
+
+## Runbook entrypoint
+
+Use `./run_v4.sh` for lock-safe scheduled execution.  
+It will:
+
+- Optionally run canonical ingest (`CANNARADAR_RUN_CANONICAL_INGEST=1`)
+- Run a full `crawl:run`
+- Write change diff artifacts
+- Write run manifest
+
+## Important env vars
+
+- `CANNARADAR_CRAWLER_CONFIG` — path to crawler config
+- `CANNARADAR_SEED_FILE` — alternate seed list
+- `CANNARADAR_DENYLIST` — comma-separated denylist domains
+- `CANNARADAR_MAX_SEEDS` — optional max seeds for one run
+- `CANNARADAR_RUN_CANONICAL_INGEST=1` — run bootstrap ingest first
+
+## Segment and scoring behavior
+
+- Segment filtering is rule-based and conservative (dispensary-first).
+- Scoring features include:
+  - buyer/contact role signals
+  - role inbox
+  - direct email
+  - menu provider detections
+  - multi-location signals
+  - enterprise/chain risk signals
+
+## Compliance
+
+- No LinkedIn crawling in the current pipeline flow.
+- Respect for robots and per-domain minimum intervals is enforced in fetch.
+- PII is intentionally constrained to business emails and phone/store contact handles with evidence.
+
+### Change report key format
+
+- `jobs/export_changes.py` outputs are keyed by a single timestamp (`YYYYMMDD-HHMMSS`).
+- `--run-id` values are normalized to that timestamp format before generating filenames.
+- `run_version` is tracked separately in `data/state/last_change_metrics.json`.
+
+Example:
 
 ```bash
-cd /Users/horcrux/Development/CannaRadar
-./run_v4.sh
+python3 jobs/export_changes.py --run-id 2026-02-17-093000
 ```
-
-## Key Outputs
-
-- `out/outreach_dispensary_100.csv` ← primary outreach file
-- `out/excluded_non_dispensary.csv` ← excluded rows (brands/distributors/unknown)
-- `out/v4_all_segmented.csv` ← full segmented data
-- `out/v4_quality_report.txt` ← quality summary
-- `out/morning_brief.txt` ← daily brief
-- `out/changes_<run-id>.csv` + `.txt` ← run diff outputs
-- `data/state/last_run_manifest.json` ← run telemetry snapshot
-- `data/state/last_change_metrics.json` ← run-to-run change metrics
-
-## Notes
-
-- This is intentionally broad capture + strict segmentation.
-- `outreach_dispensary_100.csv` should be used for outbound.
-- Segmenting uses `postprocess_segment_rules.json` and emits `segment_confidence` + `segment_reason`.
-- Owner fields are evidence-assisted and still require periodic spot checks.
-
-## Scheduling
-
-Current cron should point to `run_v4.sh` every 4h.
-
-Optional runtime env:
-
-- `CANNARADAR_CRAWL_MODE=incremental` for lighter interval runs
-- `CANNARADAR_RUN_CANONICAL_INGEST=1` to run canonical ingest via `run_v1_features.sh`
-- `CANNARADAR_CRAWLER_CONFIG=...` for alternate crawler config

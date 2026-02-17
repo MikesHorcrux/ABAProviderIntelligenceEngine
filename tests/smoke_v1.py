@@ -34,8 +34,8 @@ def test_schema_migration_metadata():
         con = sqlite3.connect(db)
         con.executescript(SCHEMA.read_text())
         user_version = int(con.execute('PRAGMA user_version').fetchone()[0])
-        assert_true(user_version == 4, f'expected schema user_version=4, got {user_version}')
-        row = con.execute('SELECT schema_checksum FROM schema_migrations WHERE schema_version=?', (4,)).fetchone()
+        assert_true(user_version == 5, f'expected schema user_version=5, got {user_version}')
+        row = con.execute('SELECT schema_checksum FROM schema_migrations WHERE schema_version=?', (5,)).fetchone()
         checksum = hashlib.sha256(SCHEMA.read_text().encode('utf-8')).hexdigest()
         assert_true(
             row is None or row[0] == checksum,
