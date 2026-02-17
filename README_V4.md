@@ -1,82 +1,104 @@
-# CannaRadar V4 / V1.5 Pipeline Notes
+# AI Agent Reference: CannaRadar v1.5
 
-This stack is now aligned to a production-oriented, evidence-driven lead pipeline:
+This document describes how an AI agent should modify and reason about the system.
 
-- Crawl only allowed public pages (robots-aware)
-- Preserve source provenance on key fields
-- Resolve duplicates deterministically
-- Score and rank leads for outreach actionability
-- Export clean dispensary-only outreach lists and research queues
+## Scope
 
-## Primary pipeline
+Use this when proposing code changes.
 
-1. `python3 cannaradar_cli.py crawl:run --seeds seeds.csv`  
-   Runs discovery → fetch → parse/extract → enrichment → scoring → exports.
-2. `python3 cannaradar_cli.py enrich:run --since <ISO_TIMESTAMP>`  
-   Re-run enrichment only for recent crawl results.
-3. `python3 cannaradar_cli.py score:run`  
-   Recompute lead scoring and feature vectors.
-4. `python3 cannaradar_cli.py export:outreach --tier A --limit 200`
-5. `python3 cannaradar_cli.py export:research --limit 200`
-6. `python3 cannaradar_cli.py quality:report`
-7. `python3 jobs/export_changes.py --run-id <YYYYMMDD-HHMMSS>`
-8. `PYTHONPATH=$PWD python3 jobs/ingest_sources.py` for canonical ingest/migrations
+Focus areas:
 
-## Outputs
+- Parser and extraction behavior (`pipeline/stages/parse.py`)
+- Fetch behavior and politeness (`pipeline/stages/fetch.py`, `pipeline/config.py`)
+- Resolution logic (`pipeline/stages/resolve.py`)
+- Scoring model and features (`pipeline/stages/score.py`)
+- Enrichment steps (`pipeline/stages/enrich.py`)
+- Export contracts (`pipeline/stages/export.py`, `jobs/export_changes.py`)
 
-- `out/outreach_ready_<YYYYMMDD-HHMMSS>.csv` (new production-ready outreach format)
-- `out/outreach_dispensary_100.csv` (legacy compatibility alias)
-- `out/excluded_non_dispensary.csv`
-- `out/research_queue.csv`
-- `out/merge_suggestions_<YYYYMMDD-HHMMSS>.csv`
-- `out/v4_quality_report.txt` + `out/quality_report.json`
-- `out/changes_<YYYYMMDD-HHMMSS>.csv` + `out/changes_<YYYYMMDD-HHMMSS>.txt`
-- `data/state/last_run_manifest.json`
-- `data/state/last_change_metrics.json`
+## Safe edit principles
 
-## Runbook entrypoint
+- One stage per patch whenever possible.
+- Keep SQL migrations additive if possible.
+- Preserve existing output column contracts unless a migration is included.
+- Add tests for changed behavior in `tests/`.
+- Preserve soft-delete patterns and `deleted_at=''` semantics unless schema-wide change is intentional.
 
-Use `./run_v4.sh` for lock-safe scheduled execution.  
-It will:
+## Required reasoning before edits
 
-- Optionally run canonical ingest (`CANNARADAR_RUN_CANONICAL_INGEST=1`)
-- Run a full `crawl:run`
-- Write change diff artifacts
-- Write run manifest
+- Identify the contract that changes (input schema, output schema, score semantics, crawl policy).
+- Confirm whether any output file contract changes (`out/*` column names or run-id format).
+- Verify how the change affects manifest/change-report schema and `run_v4.sh`.
 
-## Important env vars
+## Stage-specific editing notes
 
-- `CANNARADAR_CRAWLER_CONFIG` — path to crawler config
-- `CANNARADAR_SEED_FILE` — alternate seed list
-- `CANNARADAR_DENYLIST` — comma-separated denylist domains
-- `CANNARADAR_MAX_SEEDS` — optional max seeds for one run
-- `CANNARADAR_RUN_CANONICAL_INGEST=1` — run bootstrap ingest first
+### Fetching and crawling
 
-## Segment and scoring behavior
+- Do not modify robot or denylist behavior without documenting legal scope.
+- If adding concurrency, validate DB write path for lock contention.
+- Keep per-domain delay and cache semantics explicit in `pipeline/stages/fetch.py`.
 
-- Segment filtering is rule-based and conservative (dispensary-first).
-- Scoring features include:
-  - buyer/contact role signals
-  - role inbox
-  - direct email
-  - menu provider detections
-  - multi-location signals
-  - enterprise/chain risk signals
+### Parsing
 
-## Compliance
+- Keep extraction regexes minimal and anchored to avoid false positives.
+- Maintain role extraction in a way that does not inject non-business PII.
+- Add/extend tests in `tests/test_parse_stage.py` for each regex class changed.
 
-- No LinkedIn crawling in the current pipeline flow.
-- Respect for robots and per-domain minimum intervals is enforced in fetch.
-- PII is intentionally constrained to business emails and phone/store contact handles with evidence.
+### Resolution
 
-### Change report key format
+- `resolve_and_upsert_locations` must stay deterministic for identical seeds/pages.
+- Merge suggestions should only mark probable collisions and should not auto-merge automatically.
+- Keep confidence semantics explicit in `entity_resolutions.reason`.
 
-- `jobs/export_changes.py` outputs are keyed by a single timestamp (`YYYYMMDD-HHMMSS`).
-- `--run-id` values are normalized to that timestamp format before generating filenames.
-- `run_version` is tracked separately in `data/state/last_change_metrics.json`.
+### Scoring
 
-Example:
+- Keep score ranges within [0,100].
+- Update `FEATURE_KEYS` together with any new feature.
+- Ensure new features are inserted into `scoring_features` and covered by quality expectations.
 
-```bash
-python3 jobs/export_changes.py --run-id 2026-02-17-093000
-```
+### Exports
+
+- Never weaken segment purity for `outreach_dispensary_100.csv`.
+- Keep `outreach_ready_<timestamp>.csv` column contract stable.
+- For change-report keys, keep the single timestamp format only: `YYYYMMDD-HHMMSS`.
+
+### Migrations
+
+- Any schema change requires:
+  - `db/schema.sql` update
+  - `jobs/ingest_sources.py` checks alignment if required columns/indexes changed
+  - smoke test expectations update if needed
+- Do not weaken migration checks without explicit product approval.
+
+## Testing expectations
+
+When changes touch parsing:
+
+- add/extend `tests/test_parse_stage.py`
+
+When changes touch resolution:
+
+- add/extend `tests/test_resolve_stage.py`
+
+For broader stability:
+
+- run `./run_smoke_tests.sh` after validation in a clean environment.
+
+## How to reason about outcomes
+
+All lead quality comes from evidence:
+
+- parse/parse-derived facts with source URL
+- enrichment inferences with low confidence and explicit evidence note
+- scoring features with per-feature persistence
+
+If there is no evidence row for a critical claim, classify it as inference and keep confidence low.
+
+## Rollback habits
+
+Before major edits, record in commit message:
+
+- behavior changed
+- why changed
+- fallback plan if score/segment behavior regresses
+
+Use existing rollback playbook in `docs/RUNBOOK_V1.md` for DB-related incidents.
