@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import csv
+from collections import Counter
 from pathlib import Path
 from datetime import datetime
 
@@ -16,28 +17,54 @@ elif SECONDARY.exists():
     src = SECONDARY
 else:
     src = FALLBACK
+
 if src.exists():
     with open(src, newline='') as f:
         rows = list(csv.DictReader(f))
 
+if rows:
+    rows = [r for r in rows if isinstance(r, dict)]
+
+def to_int(v):
+    try:
+        return int(float((v or '').strip()))
+    except Exception:
+        return 0
+
 high = [r for r in rows if (r.get('owner_confidence') or '').lower() == 'high']
 with_email = [r for r in rows if r.get('email')]
 with_owner = [r for r in rows if r.get('owner_name')]
+with_score = sorted(rows, key=lambda r: to_int(r.get('score', 0)), reverse=True)
+segment_counts = Counter((r.get('segment') or '').strip().lower() or 'unknown' for r in rows)
 
-top = rows[:10]
+top = with_score[:10]
 now = datetime.now().strftime('%Y-%m-%d %I:%M %p')
 
 lines = []
 lines.append(f"Morning Brief ({now})")
+lines.append(f"Source: {src.name}")
 lines.append('')
 lines.append(f"Total leads in database: {len(rows)}")
 lines.append(f"Leads with owner identified: {len(with_owner)}")
 lines.append(f"High-confidence owner leads: {len(high)}")
 lines.append(f"Leads with email found: {len(with_email)}")
+if segment_counts:
+    lines.append('Segment distribution:')
+    for seg in ('dispensary', 'unknown', 'non-dispensary'):
+        if segment_counts.get(seg):
+            lines.append(f"  - {seg}: {segment_counts[seg]}")
 lines.append('')
 lines.append('Top 10 leads by score:')
 for i, r in enumerate(top, 1):
-    lines.append(f"{i}. {r['dispensary']} ({r['state']}) — score {r['score']} — owner: {r.get('owner_name') or 'n/a'} {('('+r.get('owner_role')+')') if r.get('owner_role') else ''}")
+    dispensary = r.get('dispensary', '').strip() or 'Unknown'
+    state = r.get('state', '').strip() or 'n/a'
+    score = r.get('score', '0')
+    owner = (r.get('owner_name') or '').strip() or 'n/a'
+    role = (r.get('owner_role') or '').strip()
+    segment = (r.get('segment') or '').strip()
+    lines.append(
+        f"{i}. {dispensary} ({state}) — score {score} — owner: {owner} {('('+role+')') if role else ''} {f'[{segment}]' if segment else ''}"
+    )
 
 OUT.write_text('\n'.join(lines) + '\n')
 print(str(OUT))

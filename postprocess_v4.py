@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import csv
+import json
 import re
 import sqlite3
 from datetime import datetime
@@ -11,11 +12,82 @@ OUT = BASE / 'out'
 IN_PRIMARY = OUT / 'enriched_leads.csv'
 IN_FALLBACK = OUT / 'raw_leads.csv'
 CANONICAL_DB = BASE / 'data/cannaradar_v1.db'
+SEGMENT_RULES_PATH = BASE / 'postprocess_segment_rules.json'
 
-# Segment rules
-STORE_POSITIVE = re.compile(r'\b(dispensary|cannabis|care station|the source|nuwu|lightshade|native roots|terrapin|flowery|stiiizy|mint|rise|sunnyside|zen leaf|verilife|muv|apothecarium|botanist|jardin|medizin)\b', re.I)
-NON_STORE = re.compile(r'\b(distributor|distribution|wholesale|manufacturer|cultivation|labs|holdings|ventures|industry|brands|company|corp|inc\.?|llc)\b', re.I)
 JUNK_OWNER = re.compile(r'\b(with the|terms|privacy|policy|email alerts|good faith|create\s|information|respect for people|team of experts)\b', re.I)
+
+DEFAULT_SEGMENT_RULES = {
+    'positive_patterns': [
+        'dispensary',
+        'cannabis',
+        'care station',
+        'the source',
+        'nuwu',
+        'lightshade',
+        'native roots',
+        'terrapin',
+        'flowery',
+        'stiiizy',
+        'mint',
+        'rise',
+        'sunnyside',
+        'zen leaf',
+        'verilife',
+        'muv',
+        'apothecarium',
+        'botanist',
+        'jardin',
+        'medizin',
+    ],
+    'negative_patterns': [
+        'distributor',
+        'distribution',
+        'wholesale',
+        'manufacturer',
+        'cultivation',
+        'labs',
+        'holdings',
+        'ventures',
+        'industry',
+        'brands',
+        'company',
+        'corp',
+        'inc.',
+        'llc',
+    ],
+}
+
+
+def load_segment_rules(path: Path = SEGMENT_RULES_PATH) -> dict[str, list[str]]:
+    rules = DEFAULT_SEGMENT_RULES.copy()
+    if not path.exists():
+        return rules
+
+    try:
+        cfg = json.loads(path.read_text())
+    except Exception:
+        return rules
+
+    if isinstance(cfg.get('positive_patterns'), list) and cfg['positive_patterns']:
+        pos = [str(x).strip() for x in cfg['positive_patterns']]
+        rules['positive_patterns'] = [x for x in pos if x]
+    if isinstance(cfg.get('negative_patterns'), list) and cfg['negative_patterns']:
+        neg = [str(x).strip() for x in cfg['negative_patterns']]
+        rules['negative_patterns'] = [x for x in neg if x]
+    return rules
+
+
+def compile_patterns(values: list[str]) -> list[tuple[str, re.Pattern]]:
+    out: list[tuple[str, re.Pattern]] = []
+    for raw in values:
+        if not raw:
+            continue
+        try:
+            pattern = re.compile(re.escape(raw), re.I)
+        except re.error:
+            continue
+        out.append((raw, pattern))
+    return out
 
 PIPELINE_FIELDS = {'dispensary', 'website', 'state', 'market', 'owner_name', 'owner_role', 'email', 'phone', 'source_url', 'score', 'checked_at'}
 CANONICAL_FIELDS = {'dispensary', 'website', 'state', 'market', 'email', 'phone', 'source_url', 'score', 'checked_at'}
@@ -60,13 +132,44 @@ def score_adjust(base, segment, email, phone, owner):
     return max(0, min(100, s))
 
 
-def classify_segment(name, website, source_url):
+def classify_segment(name, website, source_url, rules: dict[str, list[tuple[str, re.Pattern]]]):
+    pos_patterns = rules.get('positive_patterns', [])
+    neg_patterns = rules.get('negative_patterns', [])
     txt = ' '.join([name or '', website or '', source_url or ''])
-    if NON_STORE.search(txt) and not STORE_POSITIVE.search(txt):
-        return 'non-dispensary'
-    if STORE_POSITIVE.search(txt):
-        return 'dispensary'
-    return 'unknown'
+
+    positives = [pat for pat, regex in pos_patterns if regex.search(txt)]
+    negatives = [pat for pat, regex in neg_patterns if regex.search(txt)]
+
+    if positives and not negatives:
+        return (
+            'dispensary',
+            88,
+            'Matched positive segment signals: ' + ', '.join(positives[:3]),
+        )
+    if negatives and not positives:
+        return (
+            'non-dispensary',
+            90,
+            'Matched non-dispensary signals: ' + ', '.join(negatives[:3]),
+        )
+    if positives and negatives:
+        if len(positives) >= len(negatives):
+            return (
+                'dispensary',
+                64,
+                'Mixed signals with dispensary leaning: +'
+                + ', '.join(positives[:2])
+                + ' / -'
+                + ', '.join(negatives[:2]),
+            )
+        return (
+            'unknown',
+            48,
+            'Mixed segment signals with more non-dispensary terms: -'
+            + ', '.join(negatives[:2]),
+        )
+
+    return 'unknown', 24, 'No clear segment signals'
 
 
 def clean_owner(name):
@@ -158,6 +261,11 @@ def merge_rows(pipeline_row, canonical_row):
 
 def main():
     now = datetime.now().isoformat(timespec='seconds')
+    raw_rules = load_segment_rules()
+    rules = {
+        'positive_patterns': compile_patterns(raw_rules.get('positive_patterns', [])),
+        'negative_patterns': compile_patterns(raw_rules.get('negative_patterns', [])),
+    }
     pipeline_rows = dedupe_rows(read_pipeline_rows())
     canonical_rows = dedupe_rows(read_canonical_rows())
 
@@ -189,6 +297,12 @@ def main():
         phone = r.get('phone') or ''
         base_score = to_int(r.get('score'), 0)
         final_score = score_adjust(base_score, segment, email, phone, owner)
+        segment, segment_confidence, segment_reason = classify_segment(
+            name,
+            website,
+            source_url,
+            rules,
+        )
         final_rows.append({
             'dispensary': name,
             'segment': segment,
@@ -202,6 +316,8 @@ def main():
             'source_url': source_url,
             'score': str(final_score),
             'checked_at': r.get('checked_at') or now,
+            'segment_confidence': str(segment_confidence),
+            'segment_reason': segment_reason,
         })
 
     final_rows.sort(key=lambda x: (int(x['score']), x['dispensary']), reverse=True)
@@ -214,7 +330,7 @@ def main():
     out_non = OUT / 'excluded_non_dispensary.csv'
     out_qa = OUT / 'v4_quality_report.txt'
 
-    fields = ['dispensary','segment','website','state','market','owner_name','owner_role','email','phone','source_url','score','checked_at']
+    fields = ['dispensary','segment','website','state','market','owner_name','owner_role','email','phone','source_url','score','checked_at','segment_confidence','segment_reason']
 
     OUT.mkdir(parents=True, exist_ok=True)
     with out_all.open('w', newline='') as f:
