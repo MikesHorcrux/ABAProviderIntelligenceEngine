@@ -8,5 +8,5 @@
   "maxPagesPerDomain": 40,
   "respectRobots": true,
   "allowedSchemes": ["http", "https"],
-  "seedFile": "/Users/lunavanamburg/.openclaw/workspace/leads_engine/seeds.csv"
+  "seedFile": "seeds.csv"
 }
