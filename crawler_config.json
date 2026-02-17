@@ -8,5 +8,22 @@
   "maxPagesPerDomain": 40,
   "respectRobots": true,
   "allowedSchemes": ["http", "https"],
-  "seedFile": "seeds.csv"
+  "seedFile": "seeds.csv",
+  "discoverySeedFile": "discoveries.csv",
+  "monitorStaleDays": 30,
+  "monitorMaxPagesPerDomain": 12,
+  "monitorMaxTotalPages": 24,
+  "monitorMaxDepth": 1,
+  "growthMaxPagesPerDomain": 40,
+  "growthMaxTotalPages": 80,
+  "growthMaxDepth": 2,
+  "weeklyNewLeadTarget": 100,
+  "growthWindowDays": 7,
+  "enforceGrowthGovernor": true,
+  "retryBaseDelaySeconds": 1.25,
+  "retryFactor": 1.9,
+  "requireFetchSuccessGate": true,
+  "outputStaleHours": 72,
+  "seedFailureStreakLimit": 3,
+  "seedBackoffHours": 24
 }

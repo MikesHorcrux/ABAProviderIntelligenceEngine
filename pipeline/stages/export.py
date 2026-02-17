@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pipeline.utils import utcnow_iso
@@ -39,6 +39,72 @@ def _segment_company(name: str, website: str) -> tuple[str, float]:
     if positives and negatives:
         return ("dispensary", 0.65) if len(positives) >= len(negatives) else ("unknown", 0.55)
     return "unknown", 0.24
+
+
+def _days_since(timestamp: str | None, now: datetime | None = None) -> float:
+    if not timestamp:
+        return float("inf")
+    now = now or datetime.now()
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=None)
+        return (now - parsed).total_seconds() / 86400
+    except Exception:
+        return float("inf")
+
+
+def _signal_confidence(
+    fit_score: int,
+    has_buyer_contact: bool,
+    has_email: bool,
+    has_phone: bool,
+    recency_days: float,
+) -> float:
+    base = min(1.0, max(0.0, fit_score / 100))
+    recency_boost = 0.0
+    if recency_days <= 1:
+        recency_boost = 0.25
+    elif recency_days <= 7:
+        recency_boost = 0.15
+    elif recency_days <= 30:
+        recency_boost = 0.05
+
+    return min(
+        1.0,
+        round(
+            base * 0.55
+            + (0.22 if has_buyer_contact else 0.0)
+            + (0.14 if has_email else 0.0)
+            + (0.09 if has_phone else 0.0)
+            + recency_boost,
+            3,
+        ),
+    )
+
+
+def _watch_state(signal_confidence: float, recency_days: float) -> tuple[str, int]:
+    if signal_confidence >= 0.9 and recency_days <= 2:
+        return "critical", 0
+    if signal_confidence >= 0.8:
+        return "hot", 1
+    if signal_confidence >= 0.65:
+        return "warm", 2
+    if signal_confidence >= 0.5:
+        return "watch", 3
+    return "monitor", 4
+
+
+def _recency_signal(recency_days: float) -> str:
+    if recency_days == float("inf"):
+        return "unknown"
+    if recency_days <= 1:
+        return "today"
+    if recency_days <= 7:
+        return "week"
+    if recency_days <= 30:
+        return "month"
+    return "stale"
 
 
 def _best_contact(con, location_pk: str) -> tuple[str, str, str]:
@@ -89,6 +155,59 @@ def _proof_urls(con, location_pk: str) -> str:
     return "; ".join(sorted({r["source_url"] for r in rows}))
 
 
+def _has_buyer_contact(con, location_pk: str) -> bool:
+    row = con.execute(
+        """
+        SELECT 1
+        FROM contacts
+        WHERE location_pk=?
+          AND COALESCE(deleted_at,'')=''
+          AND (
+            lower(role) LIKE '%buyer%'
+            OR lower(role) LIKE '%purchasing%'
+            OR lower(role) LIKE '%inventory%'
+            OR lower(role) LIKE '%owner%'
+            OR lower(role) LIKE '%operations%'
+          )
+        LIMIT 1
+        """,
+        (location_pk,),
+    ).fetchone()
+    return row is not None
+
+
+def _has_direct_email(con, location_pk: str) -> bool:
+    row = con.execute(
+        """
+        SELECT 1
+        FROM contact_points
+        WHERE location_pk=?
+          AND type='email'
+          AND value<>''
+          AND COALESCE(deleted_at,'')=''
+        LIMIT 1
+        """,
+        (location_pk,),
+    ).fetchone()
+    return row is not None
+
+
+def _has_direct_phone(con, location_pk: str) -> bool:
+    row = con.execute(
+        """
+        SELECT 1
+        FROM contact_points
+        WHERE location_pk=?
+          AND type='phone'
+          AND value<>''
+          AND COALESCE(deleted_at,'')=''
+        LIMIT 1
+        """,
+        (location_pk,),
+    ).fetchone()
+    return row is not None
+
+
 def _active_score(con, loc_pk: str) -> tuple[int, str]:
     row = con.execute(
         "SELECT score_total, tier FROM lead_scores WHERE location_pk=? ORDER BY as_of DESC LIMIT 1",
@@ -115,7 +234,6 @@ def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_i
 
     outreach_rows: list[dict] = []
     excluded_rows: list[dict] = []
-    all_rows: list[dict] = []
 
     for row in rows:
         loc_pk = row["location_pk"]
@@ -146,7 +264,6 @@ def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_i
             "state": row["state"] or "",
         }
 
-        all_rows.append(record)
         if segment == "dispensary" and tier_order.get(current_tier, 1) >= min_tier:
             outreach_rows.append(record)
         else:
@@ -191,7 +308,7 @@ def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_i
     with legacy_out.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=legacy_fields)
         writer.writeheader()
-        for row in all_rows:
+        for row in outreach_rows:
             writer.writerow(
                 {
                     "dispensary": row["company_name"],
@@ -329,4 +446,167 @@ def export_merge_suggestions(con, out_dir: Path, run_id: str = "") -> str:
         writer.writeheader()
         for row in rows:
             writer.writerow(dict(row))
+    return str(path)
+
+
+def export_new_leads(
+    con,
+    out_dir: Path,
+    since: str | None = None,
+    limit: int = 100,
+    run_id: str = "",
+) -> str:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = out_dir / f"new_leads_since_run_{run_id}.csv"
+    cutoff = since or (datetime.now() - timedelta(days=7)).isoformat(timespec="seconds")
+    rows = con.execute(
+        """
+        SELECT location_pk, canonical_name, website_domain, state, created_at, last_crawled_at
+        FROM locations
+        WHERE COALESCE(deleted_at,'')=''
+          AND created_at >= ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (cutoff, limit),
+    ).fetchall()
+
+    fields = [
+        "company_name",
+        "website",
+        "state",
+        "created_at",
+        "last_crawled_at",
+        "contact_name",
+        "contact_title",
+        "email",
+        "phone",
+        "score",
+        "tier",
+        "menu_provider",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            loc_pk = row["location_pk"]
+            score, tier = _active_score(con, loc_pk)
+            contact_name, contact_title, contact_email = _best_contact(con, loc_pk)
+            writer.writerow(
+                {
+                    "company_name": row["canonical_name"] or "",
+                    "website": row["website_domain"] or "",
+                    "state": row["state"] or "",
+                    "created_at": row["created_at"] or "",
+                    "last_crawled_at": row["last_crawled_at"] or "",
+                    "contact_name": contact_name,
+                    "contact_title": contact_title,
+                    "email": contact_email,
+                    "phone": _best_phone(con, loc_pk),
+                    "score": str(score),
+                    "tier": tier,
+                    "menu_provider": _menu_provider_for_location(con, loc_pk),
+                }
+            )
+    return str(path)
+
+
+def export_buyer_signal_queue(
+    con,
+    out_dir: Path,
+    since: str | None = None,
+    limit: int = 200,
+    run_id: str = "",
+) -> str:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = out_dir / f"buying_signal_watchlist_{run_id}.csv"
+    cutoff = since or (datetime.now() - timedelta(days=7)).isoformat(timespec="seconds")
+    rows = con.execute(
+        """
+        SELECT location_pk, canonical_name, website_domain, state, updated_at, last_seen_at, fit_score
+        FROM locations
+        WHERE COALESCE(deleted_at,'')=''
+          AND fit_score >= 72
+          AND (updated_at >= ? OR last_seen_at >= ?)
+        ORDER BY fit_score DESC, updated_at DESC
+        LIMIT ?
+        """,
+        (cutoff, cutoff, limit * 2),
+    ).fetchall()
+
+    fields = [
+        "company_name",
+        "website",
+        "state",
+        "score",
+        "watch_state",
+        "signal_confidence",
+        "recency_days",
+        "recency_signal",
+        "segment",
+        "has_buyer_contact",
+        "has_direct_email",
+        "has_direct_phone",
+        "contact_name",
+        "contact_title",
+        "email",
+        "phone",
+        "recommended_action",
+        "updated_at",
+    ]
+    now = datetime.now()
+    ranked = []
+
+    for row in rows:
+        loc_pk = row["location_pk"]
+        has_buyer_contact = _has_buyer_contact(con, loc_pk)
+        has_email = _has_direct_email(con, loc_pk)
+        has_phone = _has_direct_phone(con, loc_pk)
+        if not (has_buyer_contact or has_email or has_phone):
+            continue
+        recency_days = _days_since(row["updated_at"] or row["last_seen_at"], now=now)
+        signal_confidence = _signal_confidence(
+            int(row["fit_score"] or 0),
+            has_buyer_contact,
+            has_email,
+            has_phone,
+            recency_days,
+        )
+        watch_state, bucket_rank = _watch_state(signal_confidence, recency_days)
+        contact_name, contact_title, contact_email = _best_contact(con, loc_pk)
+        ranked.append(
+            {
+                "company_name": row["canonical_name"] or "",
+                "website": row["website_domain"] or "",
+                "state": row["state"] or "",
+                "score": str(int(row["fit_score"] or 0)),
+                "watch_state": watch_state,
+                "signal_confidence": str(signal_confidence),
+                "recency_days": "" if recency_days == float("inf") else str(round(recency_days, 2)),
+                "recency_signal": _recency_signal(recency_days),
+                "bucket_rank": bucket_rank,
+                "segment": _segment_company(row["canonical_name"] or "", row["website_domain"] or "")[0],
+                "has_buyer_contact": str(has_buyer_contact).lower(),
+                "has_direct_email": str(has_email).lower(),
+                "has_direct_phone": str(has_phone).lower(),
+                "contact_name": contact_name,
+                "contact_title": contact_title,
+                "email": contact_email,
+                "phone": _best_phone(con, loc_pk),
+                "recommended_action": "Priority outreach target. Verify buyer role then send buying intent message.",
+                "updated_at": row["updated_at"] or "",
+            }
+        )
+
+    ranked.sort(key=lambda item: (item["bucket_rank"], -float(item["signal_confidence"]), -int(item["score"])))
+
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for row in ranked[:limit]:
+            out = dict(row)
+            out.pop("bucket_rank", None)
+            writer.writerow(out)
     return str(path)

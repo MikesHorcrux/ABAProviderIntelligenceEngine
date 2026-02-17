@@ -16,8 +16,8 @@ DB = BASE / "data/cannaradar_v1.db"
 SCHEMA = BASE / "db/schema.sql"
 SCHEMA_TEXT = SCHEMA.read_text()
 
-SCHEMA_VERSION = 5
-SCHEMA_MIGRATION_NAME = "v1.5.1"
+SCHEMA_VERSION = 6
+SCHEMA_MIGRATION_NAME = "v1.6.0"
 SCHEMA_CHECKSUM = hashlib.sha256(SCHEMA_TEXT.encode("utf-8")).hexdigest()
 
 SCHEMA_ROLLBACK = """
@@ -40,6 +40,29 @@ REQUIRED_TABLE_COLUMNS = {
     "domains": {"domain_pk", "location_pk", "domain", "is_primary", "confidence", "source_url", "last_seen_at", "created_at", "updated_at", "deleted_at"},
     "enrichment_sources": {"enrichment_source_pk", "source_type", "source_name", "source_url", "fetched_at", "success", "payload_hash"},
     "crawl_jobs": {"crawl_job_pk", "seed_name", "seed_domain", "status", "mode", "created_at", "updated_at", "deleted_at"},
+    "seed_telemetry": {
+        "seed_domain",
+        "seed_name",
+        "attempts",
+        "successes",
+        "failures",
+        "success_runs",
+        "failure_runs",
+        "consecutive_failures",
+        "last_status_code",
+        "last_success_at",
+        "last_failure_at",
+        "last_run_started_at",
+        "last_run_completed_at",
+        "last_run_status",
+        "last_run_pages_fetched",
+        "last_run_success_pages",
+        "last_run_failure_pages",
+        "last_run_job_pk",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    },
     "crawl_results": {"crawl_result_pk", "crawl_job_pk", "requested_url", "target_url", "status_code", "content_hash", "content", "fetched_at", "created_at", "updated_at", "deleted_at"},
     "entity_resolutions": {"resolution_pk", "canonical_location_pk", "candidate_location_pk", "resolution_status", "reason", "confidence", "created_at", "updated_at", "deleted_at"},
     "lead_scores": {"score_pk", "location_pk", "score_total", "tier", "run_id", "created_at", "as_of", "deleted_at"},
@@ -72,6 +95,10 @@ REQUIRED_INDEXES = {
     },
     "crawl_jobs": {
         "idx_crawl_jobs_status",
+    },
+    "seed_telemetry": {
+        "idx_seed_telemetry_last_success_at",
+        "idx_seed_telemetry_failures",
     },
     "crawl_results": {
         "idx_crawl_results_job",

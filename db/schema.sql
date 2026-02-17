@@ -1,6 +1,6 @@
 -- CannaRadar production schema (v1.5)
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;
 
 CREATE TABLE IF NOT EXISTS organizations (
   org_pk TEXT PRIMARY KEY NOT NULL,
@@ -168,6 +168,32 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_crawl_jobs_seed_domain ON crawl_jobs(seed_domain);
 CREATE INDEX IF NOT EXISTS idx_crawl_jobs_status ON crawl_jobs(status);
+
+CREATE TABLE IF NOT EXISTS seed_telemetry (
+  seed_domain TEXT PRIMARY KEY NOT NULL,
+  seed_name TEXT NOT NULL DEFAULT '',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  successes INTEGER NOT NULL DEFAULT 0,
+  failures INTEGER NOT NULL DEFAULT 0,
+  success_runs INTEGER NOT NULL DEFAULT 0,
+  failure_runs INTEGER NOT NULL DEFAULT 0,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  last_status_code INTEGER NOT NULL DEFAULT 0,
+  last_success_at TEXT,
+  last_failure_at TEXT,
+  last_run_started_at TEXT,
+  last_run_completed_at TEXT,
+  last_run_status TEXT NOT NULL DEFAULT 'unknown',
+  last_run_pages_fetched INTEGER NOT NULL DEFAULT 0,
+  last_run_success_pages INTEGER NOT NULL DEFAULT 0,
+  last_run_failure_pages INTEGER NOT NULL DEFAULT 0,
+  last_run_job_pk TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT '',
+  deleted_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_seed_telemetry_last_success_at ON seed_telemetry(last_success_at);
+CREATE INDEX IF NOT EXISTS idx_seed_telemetry_failures ON seed_telemetry(consecutive_failures, last_failure_at);
 
 CREATE TABLE IF NOT EXISTS crawl_results (
   crawl_result_pk TEXT PRIMARY KEY NOT NULL,
