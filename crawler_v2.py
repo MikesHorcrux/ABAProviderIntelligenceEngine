@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-import csv, re, sqlite3, time, json, argparse, hashlib
+import argparse
+import csv
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlparse, urlunparse, parse_qsl, urlencode
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse, urlencode
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 from urllib import robotparser
 
 BASE = Path(__file__).resolve().parent
@@ -30,7 +37,7 @@ DEFAULT_CFG = {
   'maxPagesPerDomain': 40,
   'respectRobots': True,
   'allowedSchemes': ['http', 'https'],
-  'seedFile': str(SEEDS_PATH)
+  'seedFile': str(SEEDS_PATH),
 }
 
 
@@ -42,16 +49,52 @@ class Seed:
   market: str
 
 
-def load_cfg():
-  if not CFG_PATH.exists():
-    CFG_PATH.write_text(json.dumps(DEFAULT_CFG, indent=2))
-    return DEFAULT_CFG
+def _load_json(path: Path) -> dict:
+  if not path.exists():
+    return DEFAULT_CFG.copy()
   try:
-    cfg = json.loads(CFG_PATH.read_text())
-    merged = DEFAULT_CFG.copy(); merged.update(cfg)
-    return merged
+    return json.loads(path.read_text())
   except Exception:
-    return DEFAULT_CFG
+    return DEFAULT_CFG.copy()
+
+
+def load_cfg(cfg_path: Path):
+  cfg = _load_json(cfg_path)
+  merged = DEFAULT_CFG.copy()
+  merged.update(cfg)
+
+  env_seed = os.getenv('CANNARADAR_SEED_FILE')
+  if env_seed:
+    merged['seedFile'] = env_seed
+
+  return merged
+
+
+def _resolve_path(raw: str | None, base: Path) -> Path | None:
+  if not raw:
+    return None
+  p = Path(raw)
+  if not p.is_absolute():
+    p = (base / p).resolve()
+  return p
+
+
+def resolve_seed_file(cfg: dict) -> Path:
+  candidates = [
+    os.getenv('CANNARADAR_SEED_FILE'),
+    cfg.get('seedFile'),
+    str(SEEDS_PATH),
+  ]
+  found = []
+  for candidate in candidates:
+    p = _resolve_path(candidate, BASE)
+    if not p:
+      continue
+    if str(p) not in found:
+      found.append(str(p))
+    if p.exists():
+      return p
+  raise SystemExit('Seed file not found. Checked: ' + ', '.join(found))
 
 
 def norm_url(url: str) -> str:
@@ -66,7 +109,7 @@ def norm_url(url: str) -> str:
     path = p.path or '/'
     if path != '/' and path.endswith('/'):
       path = path[:-1]
-    q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=False) if not k.lower().startswith('utm_') and k.lower() not in {'fbclid','gclid'}]
+    q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=False) if not k.lower().startswith('utm_') and k.lower() not in {'fbclid', 'gclid'}]
     query = urlencode(sorted(q))
     return urlunparse((scheme, host, path, '', query, ''))
   except Exception:
@@ -105,13 +148,14 @@ def strip_html(html: str) -> str:
   return t.strip()
 
 
-def extract_links(base_url: str, html: str):
+def extract_links(base_url: str, html: str, cfg) -> list[str]:
+  allowed = {s.lower() for s in cfg.get('allowedSchemes', ['http', 'https'])}
   out = []
   for raw in HREF_RE.findall(html):
     u = urljoin(base_url, raw)
     nu = norm_url(u)
     p = urlparse(nu)
-    if p.scheme not in {'http','https'}:
+    if p.scheme.lower() not in allowed:
       continue
     out.append(nu)
   return out
@@ -119,11 +163,16 @@ def extract_links(base_url: str, html: str):
 
 def score(owner, role, email, phone, pages):
   s = 0
-  if owner: s += 40
-  if role: s += 20
-  if email: s += 20
-  if phone: s += 10
-  if pages >= 5: s += 10
+  if owner:
+    s += 40
+  if role:
+    s += 20
+  if email:
+    s += 20
+  if phone:
+    s += 10
+  if pages >= 5:
+    s += 10
   return min(100, s)
 
 
@@ -166,18 +215,41 @@ def init_db():
   return con
 
 
-def load_seeds(path: Path):
+def load_seeds(cfg) -> list[Seed]:
+  path = resolve_seed_file(cfg)
   rows = list(csv.DictReader(path.open()))
   seeds = []
   for r in rows:
-    seeds.append(Seed((r.get('name') or '').strip(), norm_url((r.get('website') or '').strip()), (r.get('state') or '').strip(), (r.get('market') or '').strip()))
+    seeds.append(Seed(
+      (r.get('name') or '').strip(),
+      norm_url((r.get('website') or '').strip()),
+      (r.get('state') or '').strip(),
+      (r.get('market') or '').strip(),
+    ))
   return [s for s in seeds if s.website]
+
+
+def prune_stale_leads(con: sqlite3.Connection, current_seed_websites: list[str], mode: str):
+  if mode == 'full':
+    con.execute('DELETE FROM leads')
+    con.execute('DELETE FROM crawl_pages')
+    return
+
+  if not current_seed_websites:
+    con.execute('DELETE FROM leads')
+    return
+
+  con.execute('DELETE FROM leads WHERE website NOT IN (%s)' % ','.join('?' * len(current_seed_websites)),
+              tuple(current_seed_websites))
+
+  for website in current_seed_websites:
+    con.execute('DELETE FROM leads WHERE website=?', (website,))
+    con.execute('DELETE FROM leads WHERE run_id LIKE \'enrich-%\' AND website=?', (website,))
 
 
 def crawl_seed(seed: Seed, cfg, con, run_id):
   start = seed.website
   rp = robotparser.RobotFileParser()
-  robots_ok = True
   if cfg.get('respectRobots', True):
     try:
       robots_url = urljoin(start, '/robots.txt')
@@ -195,9 +267,11 @@ def crawl_seed(seed: Seed, cfg, con, run_id):
 
   while q:
     url, depth = q.pop(0)
-    if url in seen: continue
+    if url in seen:
+      continue
     seen.add(url)
-    if len(seen) > cfg['maxPagesPerDomain']: break
+    if len(seen) > cfg['maxPagesPerDomain']:
+      break
     if cfg.get('respectRobots', True):
       try:
         if not rp.can_fetch(cfg['userAgent'], url):
@@ -234,7 +308,7 @@ def crawl_seed(seed: Seed, cfg, con, run_id):
         best = cand
 
       if depth < cfg['maxDepth']:
-        for lk in extract_links(url, html):
+        for lk in extract_links(url, html, cfg):
           if same_domain(start, lk):
             q.append((lk, depth + 1))
 
@@ -261,10 +335,10 @@ def crawl_seed(seed: Seed, cfg, con, run_id):
   return row
 
 
-def write_exports(con):
+def write_exports(con, run_id):
   OUT_DIR.mkdir(parents=True, exist_ok=True)
   rows = con.execute('''SELECT dispensary,website,state,market,owner_name,owner_role,owner_confidence,email,phone,source_url,source_snippet,pages_crawled,score,checked_at
-                        FROM leads ORDER BY score DESC, pages_crawled DESC, dispensary''').fetchall()
+                        FROM leads WHERE run_id=? ORDER BY score DESC, pages_crawled DESC, dispensary''', (run_id,)).fetchall()
 
   raw = OUT_DIR / 'raw_leads.csv'
   with raw.open('w', newline='') as f:
@@ -291,26 +365,37 @@ def write_exports(con):
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument('--mode', choices=['full','incremental'], default='full')
+  ap.add_argument('--config', default=str(CFG_PATH))
   args = ap.parse_args()
 
-  cfg = load_cfg()
+  cfg = load_cfg(Path(args.config))
   con = init_db()
   run_id = datetime.now().strftime('%Y%m%d-%H%M%S')
-  seeds = load_seeds(Path(cfg['seedFile']))
+  seeds = load_seeds(cfg)
+  seed_websites = [s.website for s in seeds]
+  prune_stale_leads(con, seed_websites, args.mode)
 
   print(f'Run {run_id} | mode={args.mode} | seeds={len(seeds)}')
+  started = datetime.now()
+  total_pages = 0
+  total_ok = 0
+
   for i, seed in enumerate(seeds, 1):
     print(f'[{i}/{len(seeds)}] Crawling {seed.name} -> {seed.website}', flush=True)
     row = crawl_seed(seed, cfg, con, run_id)
-    con.execute('DELETE FROM leads WHERE website=?', (seed.website,))
-    con.execute('''INSERT INTO leads (run_id,dispensary,website,state,market,owner_name,owner_role,owner_confidence,email,phone,source_url,source_snippet,pages_crawled,score,checked_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+    total_pages += row['pages_crawled']
+    if row['score'] > 0:
+      total_ok += 1
+    con.execute('INSERT INTO leads (run_id,dispensary,website,state,market,owner_name,owner_role,owner_confidence,email,phone,source_url,source_snippet,pages_crawled,score,checked_at) '
+                   'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 (row['run_id'],row['dispensary'],row['website'],row['state'],row['market'],row['owner_name'],row['owner_role'],row['owner_confidence'],row['email'],row['phone'],row['source_url'],row['source_snippet'],row['pages_crawled'],row['score'],row['checked_at']))
     con.commit()
 
-  write_exports(con)
-  total = con.execute('SELECT COUNT(*) FROM leads').fetchone()[0]
-  print(f'Done. leads={total} exports in {OUT_DIR}')
+  write_exports(con, run_id)
+  total = con.execute('SELECT COUNT(*) FROM leads WHERE run_id=?', (run_id,)).fetchone()[0]
+  elapsed = (datetime.now() - started).total_seconds()
+  print(f'Done. leads={total} | rich={total_ok} | pages={total_pages} | elapsed={elapsed:.1f}s | exports in {OUT_DIR}')
+
 
 if __name__ == '__main__':
   main()

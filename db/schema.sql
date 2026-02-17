@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS licenses (
   FOREIGN KEY (org_pk) REFERENCES organizations(org_pk)
 );
 
+CREATE INDEX IF NOT EXISTS idx_licenses_org_pk ON licenses(org_pk);
+CREATE INDEX IF NOT EXISTS idx_licenses_state ON licenses(state);
+
 CREATE TABLE IF NOT EXISTS locations (
   location_pk TEXT PRIMARY KEY,
   org_pk TEXT,
@@ -39,6 +42,10 @@ CREATE TABLE IF NOT EXISTS locations (
   FOREIGN KEY (org_pk) REFERENCES organizations(org_pk)
 );
 
+CREATE INDEX IF NOT EXISTS idx_locations_org_pk ON locations(org_pk);
+CREATE INDEX IF NOT EXISTS idx_locations_state ON locations(state);
+CREATE INDEX IF NOT EXISTS idx_locations_website_domain ON locations(website_domain);
+
 CREATE TABLE IF NOT EXISTS contact_points (
   contact_pk TEXT PRIMARY KEY,
   location_pk TEXT,
@@ -51,6 +58,9 @@ CREATE TABLE IF NOT EXISTS contact_points (
   FOREIGN KEY (location_pk) REFERENCES locations(location_pk)
 );
 
+CREATE INDEX IF NOT EXISTS idx_contact_points_location_pk ON contact_points(location_pk);
+CREATE INDEX IF NOT EXISTS idx_contact_points_type ON contact_points(type);
+
 CREATE TABLE IF NOT EXISTS evidence (
   evidence_pk TEXT PRIMARY KEY,
   entity_type TEXT,
@@ -61,6 +71,8 @@ CREATE TABLE IF NOT EXISTS evidence (
   snippet TEXT,
   captured_at TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_evidence_entity ON evidence(entity_type, entity_pk);
 
 CREATE TABLE IF NOT EXISTS outreach_events (
   event_pk TEXT PRIMARY KEY,

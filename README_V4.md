@@ -12,7 +12,7 @@ Purpose: continuously generate dispensary-focused outreach leads every few hours
 Run all:
 
 ```bash
-cd /Users/lunavanamburg/.openclaw/workspace/leads_engine
+cd /Users/horcrux/Development/CannaRadar
 ./run_v4.sh
 ```
 
@@ -33,4 +33,3 @@ cd /Users/lunavanamburg/.openclaw/workspace/leads_engine
 ## Scheduling
 
 Current cron should point to `run_v4.sh` every 4h.
-
