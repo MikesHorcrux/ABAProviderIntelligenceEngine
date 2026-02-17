@@ -54,6 +54,7 @@ flowchart TD
 - `run_v4.sh`: safe scheduled runner.
 - `docs/RUNBOOK_V1.md`: operator runbook.
 - `README_AI_AGENTS.md`: AI-agent operating reference.
+- `~/.codex/skills/cannaradar-ai-agents/SKILL.md`: CannaRadar AI-agent skill.
 
 ## Command surface
 
@@ -166,6 +167,11 @@ Use this order for safe modifications:
 - If changing scores, update `pipeline/stages/score.py` and expected ranges/features.
 
 Use strict confidence tracking for every new extraction path and always provide evidence URLs in `evidence` rows.
+
+### AI skill pointer
+
+- Skill path: `~/.codex/skills/cannaradar-ai-agents/SKILL.md`
+- Use this when you need structured, stage-safe changes or AI handoffs.
 
 ## Troubleshooting
 
