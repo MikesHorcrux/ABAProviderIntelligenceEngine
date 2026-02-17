@@ -3,7 +3,7 @@ import csv
 from pathlib import Path
 from datetime import datetime
 
-BASE = Path('/Users/lunavanamburg/.openclaw/workspace/leads_engine')
+BASE = Path(__file__).resolve().parent
 PRIMARY = BASE / 'out/outreach_dispensary_100.csv'
 SECONDARY = BASE / 'out/enriched_leads.csv'
 FALLBACK = BASE / 'out/verified_leads.csv'

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-import csv, re
+import csv
+import re
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 
-BASE = Path('/Users/lunavanamburg/.openclaw/workspace/leads_engine')
+BASE = Path(__file__).resolve().parent
 OUT = BASE / 'out'
 IN_PRIMARY = OUT / 'enriched_leads.csv'
 IN_FALLBACK = OUT / 'raw_leads.csv'
+CANONICAL_DB = BASE / 'data/cannaradar_v1.db'
 
 # Segment rules
 STORE_POSITIVE = re.compile(r'\b(dispensary|cannabis|care station|the source|nuwu|lightshade|native roots|terrapin|flowery|stiiizy|mint|rise|sunnyside|zen leaf|verilife|muv|apothecarium|botanist|jardin|medizin)\b', re.I)
@@ -18,9 +21,12 @@ def score_adjust(base, segment, email, phone, owner):
     s = int(base or 0)
     if segment == 'dispensary':
         s += 15
-    if email: s += 5
-    if phone: s += 5
-    if owner: s += 5
+    if email:
+        s += 5
+    if phone:
+        s += 5
+    if owner:
+        s += 5
     return max(0, min(100, s))
 
 
@@ -35,24 +41,78 @@ def classify_segment(name, website, source_url):
 
 def clean_owner(name):
     n = (name or '').strip()
-    if not n: return ''
-    if JUNK_OWNER.search(n): return ''
-    # basic human-name heuristic: 2-3 capitalized words
+    if not n:
+        return ''
+    if JUNK_OWNER.search(n):
+        return ''
     parts = n.split()
-    if len(parts) < 2 or len(parts) > 3: return ''
-    if not all(p[:1].isupper() for p in parts): return ''
+    if len(parts) < 2 or len(parts) > 3:
+        return ''
+    if not all(p[:1].isupper() for p in parts):
+        return ''
     return n
 
 
-def read_rows():
+def read_pipeline_rows():
     src = IN_PRIMARY if IN_PRIMARY.exists() else IN_FALLBACK
     if not src.exists():
         return []
     return list(csv.DictReader(src.open()))
 
 
+def read_canonical_rows():
+    if not CANONICAL_DB.exists():
+        return []
+
+    con = sqlite3.connect(CANONICAL_DB)
+    rows = con.execute(
+        '''SELECT l.canonical_name, l.website_domain, l.state, l.phone,
+                  MAX(CASE WHEN cp.type='email' THEN cp.value ELSE '' END) as email,
+                  MAX(CASE WHEN cp.type='website' THEN cp.value ELSE '' END) as source_url
+           FROM locations l
+           LEFT JOIN contact_points cp ON cp.location_pk = l.location_pk
+           GROUP BY l.location_pk, l.canonical_name, l.website_domain, l.state, l.phone'''
+    ).fetchall()
+    con.close()
+
+    out = []
+    for name, website, state, phone, email, source_url in rows:
+        out.append({
+            'dispensary': name or '',
+            'website': website or '',
+            'state': state or '',
+            'market': '',
+            'owner_name': '',
+            'owner_role': '',
+            'email': email or '',
+            'phone': phone or '',
+            'source_url': source_url or website or '',
+            'score': '0',
+            'checked_at': '',
+        })
+    return out
+
+
+def dedupe_rows(rows):
+    seen = set()
+    out = []
+    for r in rows:
+        website = (r.get('website') or '').strip().lower().replace('https://', '').replace('http://', '').strip('/')
+        name = (r.get('dispensary') or r.get('name') or '').strip().lower()
+        state = (r.get('state') or '').strip().lower()
+        key = (website or name, state)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
 def main():
-    rows = read_rows()
+    pipeline_rows = read_pipeline_rows()
+    canonical_rows = read_canonical_rows()
+    rows = dedupe_rows(pipeline_rows + canonical_rows)
+
     now = datetime.now().isoformat(timespec='seconds')
     normalized = []
     for r in rows:
@@ -93,12 +153,19 @@ def main():
 
     fields = ['dispensary','segment','website','state','market','owner_name','owner_role','email','phone','source_url','score','checked_at']
 
+    OUT.mkdir(parents=True, exist_ok=True)
     with out_all.open('w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=fields); w.writeheader(); w.writerows(normalized)
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(normalized)
     with out_disp.open('w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=fields); w.writeheader(); w.writerows(dispensary[:100])
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(dispensary[:100])
     with out_non.open('w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=fields); w.writeheader(); w.writerows(non_disp)
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(non_disp)
 
     lines = []
     lines.append(f'V4 Quality Report ({now})')
@@ -108,6 +175,7 @@ def main():
     lines.append(f'Dispensary rows w/ email: {sum(1 for r in dispensary if r["email"])}')
     lines.append(f'Dispensary rows w/ phone: {sum(1 for r in dispensary if r["phone"])}')
     lines.append(f'Dispensary rows w/ cleaned owner: {sum(1 for r in dispensary if r["owner_name"])}')
+    lines.append(f'Canonical rows merged: {len(canonical_rows)}')
     lines.append('')
     lines.append('Top dispensary rows:')
     for r in dispensary[:15]:
@@ -115,6 +183,7 @@ def main():
 
     out_qa.write_text('\n'.join(lines) + '\n')
     print(f'Wrote {out_disp} ({len(dispensary[:100])} rows)')
+
 
 if __name__ == '__main__':
     main()

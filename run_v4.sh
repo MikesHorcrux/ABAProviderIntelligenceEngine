@@ -1,6 +1,6 @@
 #!/bin/zsh
-set -e
-cd /Users/lunavanamburg/.openclaw/workspace/leads_engine
+set -euo pipefail
+cd "$(dirname "$0")"
 ./crawler_v2.py --mode full
 ./enrich.py
 ./postprocess_v4.py
