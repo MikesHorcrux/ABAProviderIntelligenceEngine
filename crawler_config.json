@@ -23,6 +23,8 @@
   "retryBaseDelaySeconds": 1.25,
   "retryFactor": 1.9,
   "requireFetchSuccessGate": true,
+  "requireNetNewGate": true,
+  "failOnZeroNewLeads": false,
   "outputStaleHours": 72,
   "seedFailureStreakLimit": 3,
   "seedBackoffHours": 24

@@ -38,6 +38,8 @@ class CrawlConfig:
     seed_backoff_hours: int = 24
     cache_ttl_hours: int = 24
     require_fetch_success_gate: bool = True
+    require_net_new_gate: bool = True
+    fail_on_zero_new_leads: bool = False
     output_stale_hours: int = 72
     retry_base_delay_seconds: float = 1.25
     retry_factor: float = 1.9
@@ -101,6 +103,8 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
     growth_window_days = os.environ.get("CANNARADAR_GROWTH_WINDOW_DAYS")
     enforce_growth_governor = os.environ.get("CANNARADAR_ENFORCE_GROWTH_GOVERNOR")
     require_fetch_success_gate = os.environ.get("CANNARADAR_REQUIRE_FETCH_SUCCESS_GATE")
+    require_net_new_gate = os.environ.get("CANNARADAR_REQUIRE_NET_NEW_GATE")
+    fail_on_zero_new_leads = os.environ.get("CANNARADAR_FAIL_ON_ZERO_NEW_LEADS")
     output_stale_hours = os.environ.get("CANNARADAR_OUTPUT_STALE_HOURS")
     retry_base_delay_seconds = os.environ.get("CANNARADAR_RETRY_BASE_DELAY_SECONDS")
     retry_factor = os.environ.get("CANNARADAR_RETRY_FACTOR")
@@ -150,6 +154,20 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
             _coerce_bool(
                 data.get("requireFetchSuccessGate"),
                 defaults.require_fetch_success_gate,
+            ),
+        ),
+        require_net_new_gate=_coerce_bool(
+            require_net_new_gate,
+            _coerce_bool(
+                data.get("requireNetNewGate"),
+                defaults.require_net_new_gate,
+            ),
+        ),
+        fail_on_zero_new_leads=_coerce_bool(
+            fail_on_zero_new_leads,
+            _coerce_bool(
+                data.get("failOnZeroNewLeads"),
+                defaults.fail_on_zero_new_leads,
             ),
         ),
         output_stale_hours=int(output_stale_hours or data.get("outputStaleHours", defaults.output_stale_hours)),
