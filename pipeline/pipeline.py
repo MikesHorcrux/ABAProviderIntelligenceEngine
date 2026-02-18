@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -35,6 +36,7 @@ SCHEMA_PATH = ROOT / "db/schema.sql"
 OUT_DIR = ROOT / "out"
 MANIFEST_PATH = ROOT / "data" / "state" / "last_run_manifest.json"
 DAILY_GROWTH_SUMMARY_PATH = OUT_DIR / "daily_growth_summary.json"
+INBOUND_DISCOVERY_PATH = ROOT / "data" / "inbound" / "discoveries_inbound.csv"
 
 
 def _normalise_seed_from_job(seed_name: str | None, seed_domain: str | None) -> DiscoverySeed:
@@ -168,6 +170,92 @@ class PipelineRunner:
             return False
 
         return datetime.utcnow() - last_seen.replace(tzinfo=None) < timedelta(hours=cooldown_hours)
+
+    def _active_domains(self, con: sqlite3.Connection) -> set[str]:
+        active: set[str] = set()
+        domain_rows = con.execute("SELECT domain FROM domains WHERE deleted_at = ''").fetchall()
+        for row in domain_rows:
+            domain = normalize_domain(row["domain"] or "")
+            if domain:
+                active.add(domain)
+
+        location_rows = con.execute("SELECT website_domain FROM locations WHERE deleted_at = ''").fetchall()
+        for row in location_rows:
+            domain = normalize_domain(row["website_domain"] or "")
+            if domain:
+                active.add(domain)
+        return active
+
+    def _intake_inbound_discovery_seeds(self) -> dict[str, int]:
+        inbound_path = INBOUND_DISCOVERY_PATH
+        if not inbound_path.exists():
+            return {"inbound_rows": 0, "added": 0, "skipped": 0}
+
+        discovery_path = Path(self.config.discovery_seed_file)
+        if not discovery_path.is_absolute():
+            discovery_path = ROOT / discovery_path
+        discovery_path.parent.mkdir(parents=True, exist_ok=True)
+
+        existing_batch = load_seeds(str(discovery_path), source="discovery_file", priority=60) if discovery_path.exists() else None
+        existing: dict[tuple[str, str], DiscoverySeed] = {}
+        if existing_batch:
+            for seed in existing_batch.seeds:
+                existing[(seed.website, seed.state.lower())] = seed
+
+        with inbound_path.open(newline="", encoding="utf-8") as f:
+            inbound_rows = list(csv.DictReader(f))
+
+        if not inbound_rows:
+            return {"inbound_rows": 0, "added": 0, "skipped": 0}
+
+        con = connect_db(self.db_path, SCHEMA_PATH)
+        active_domains = self._active_domains(con)
+        con.close()
+
+        added = 0
+        skipped = 0
+        for row in inbound_rows:
+            website = normalize_url((row.get("website") or "").strip())
+            if not website:
+                skipped += 1
+                continue
+            domain = normalize_domain(website)
+            state = (row.get("state") or "").strip()
+            key = (website, state.lower())
+            if not domain or domain in active_domains or key in existing:
+                skipped += 1
+                continue
+            existing[key] = DiscoverySeed(
+                name=(row.get("name") or domain).strip() or domain,
+                website=website,
+                state=state,
+                market=(row.get("market") or state).strip(),
+                source="inbound_seed",
+                priority=80,
+            )
+            added += 1
+
+        if added:
+            ordered = sorted(existing.values(), key=lambda s: (s.priority, s.name.lower(), s.website), reverse=True)
+            with discovery_path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=["name", "website", "state", "market"])
+                writer.writeheader()
+                for seed in ordered:
+                    writer.writerow(
+                        {
+                            "name": seed.name,
+                            "website": seed.website,
+                            "state": seed.state,
+                            "market": seed.market,
+                        }
+                    )
+
+        # Clear inbound queue after intake to avoid repeated reprocessing.
+        with inbound_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["name", "website", "state", "market"])
+            writer.writeheader()
+
+        return {"inbound_rows": len(inbound_rows), "added": added, "skipped": skipped}
 
     def _discovery_stage(self, seed_limit: int | None = None) -> list[DiscoverySeed]:
         sources: list[tuple[str, str, int]] = []
@@ -810,6 +898,7 @@ class PipelineRunner:
             "completed_at_utc": payload.get("completed_at_utc"),
             "crawl_mode": payload.get("crawl_mode"),
             "seed_counts": payload.get("seed_counts", {}),
+            "seed_intake": payload.get("seed_intake", {}),
             "discovery_metrics": payload.get("discovery_metrics", {}),
             "reliability_gate": payload.get("reliability_gate", {}),
             "net_new_gate": payload.get("net_new_gate", {}),
@@ -845,6 +934,8 @@ class PipelineRunner:
             requested_discovery_limit=requested_limit,
         )
         con.close()
+
+        intake_stats = self._intake_inbound_discovery_seeds()
 
         discovery_limit = governor.get("discovery_limit")
         if requested_limit is not None and discovery_limit is not None:
@@ -906,6 +997,7 @@ class PipelineRunner:
                     "crawl_mode": crawl_mode,
                     "seed_counts": {"discovery": len(discovery_seeds), "monitor": len(monitoring_seeds)},
                     "seed_limit": discovery_limit,
+                    "seed_intake": intake_stats,
                 }
                 self._write_last_run_manifest(report)
                 self._write_daily_growth_summary(report)
@@ -934,6 +1026,7 @@ class PipelineRunner:
                     "completed_at_utc": utcnow_iso(),
                     "crawl_mode": crawl_mode,
                     "seed_counts": {"discovery": len(discovery_seeds), "monitor": len(monitoring_seeds)},
+                    "seed_intake": intake_stats,
                 }
             )
             net_new_gate = self._evaluate_net_new_gate(report)
@@ -964,6 +1057,7 @@ class PipelineRunner:
             "completed_at_utc": utcnow_iso(),
             "crawl_mode": crawl_mode,
             "seed_counts": {"discovery": 0, "monitor": 0},
+            "seed_intake": intake_stats,
             "reliability_gate": {"passed": True, "failed": False, "reason": "no_seeds"},
             "net_new_gate": {"passed": True, "failed": False, "reason": "no_work", "new_leads_count": 0},
         }
