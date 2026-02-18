@@ -34,6 +34,7 @@ DB_PATH = ROOT / "data/cannaradar_v1.db"
 SCHEMA_PATH = ROOT / "db/schema.sql"
 OUT_DIR = ROOT / "out"
 MANIFEST_PATH = ROOT / "data" / "state" / "last_run_manifest.json"
+DAILY_GROWTH_SUMMARY_PATH = OUT_DIR / "daily_growth_summary.json"
 
 
 def _normalise_seed_from_job(seed_name: str | None, seed_domain: str | None) -> DiscoverySeed:
@@ -787,6 +788,37 @@ class PipelineRunner:
         base.update(payload)
         MANIFEST_PATH.write_text(json.dumps(base, indent=2), encoding="utf-8")
 
+    def _evaluate_net_new_gate(self, report: dict[str, object]) -> dict[str, object]:
+        metrics = report.get("discovery_metrics") if isinstance(report.get("discovery_metrics"), dict) else {}
+        new_leads_count = int(metrics.get("new_leads_count", 0)) if metrics else 0
+        passed = new_leads_count > 0
+        failed = bool(self.config.fail_on_zero_new_leads and self.config.require_net_new_gate and not passed)
+        reason = "passed" if passed else "no_new_leads"
+        return {
+            "passed": passed,
+            "failed": failed,
+            "reason": reason,
+            "new_leads_count": new_leads_count,
+        }
+
+    def _write_daily_growth_summary(self, payload: dict[str, object]) -> None:
+        DAILY_GROWTH_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "generated_at": utcnow_iso(),
+            "status": payload.get("status"),
+            "started_at_utc": payload.get("started_at_utc"),
+            "completed_at_utc": payload.get("completed_at_utc"),
+            "crawl_mode": payload.get("crawl_mode"),
+            "seed_counts": payload.get("seed_counts", {}),
+            "discovery_metrics": payload.get("discovery_metrics", {}),
+            "reliability_gate": payload.get("reliability_gate", {}),
+            "net_new_gate": payload.get("net_new_gate", {}),
+            "growth_governor": payload.get("growth_governor", {}),
+            "quality": payload.get("quality", {}),
+            "outreach": payload.get("outreach", {}),
+        }
+        DAILY_GROWTH_SUMMARY_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
     def run_crawl(
         self,
         seed_limit: int | None = None,
@@ -876,6 +908,7 @@ class PipelineRunner:
                     "seed_limit": discovery_limit,
                 }
                 self._write_last_run_manifest(report)
+                self._write_daily_growth_summary(report)
                 raise RuntimeError(f"Reliability gate failed: {reliability['reason']}")
 
             previous_run = self._previous_run_started_at()
@@ -903,7 +936,18 @@ class PipelineRunner:
                     "seed_counts": {"discovery": len(discovery_seeds), "monitor": len(monitoring_seeds)},
                 }
             )
+            net_new_gate = self._evaluate_net_new_gate(report)
+            report["net_new_gate"] = net_new_gate
+            if self.config.require_net_new_gate and not net_new_gate["passed"]:
+                report["status"] = "failed" if net_new_gate["failed"] else "degraded"
+                self._write_last_run_manifest(report)
+                self._write_daily_growth_summary(report)
+                if net_new_gate["failed"]:
+                    raise RuntimeError("Net-new gate failed: new_leads_count == 0")
+                return report
+
             self._write_last_run_manifest(report)
+            self._write_daily_growth_summary(report)
             return report
 
         self.metrics.inc("no_seeds")
@@ -921,6 +965,8 @@ class PipelineRunner:
             "crawl_mode": crawl_mode,
             "seed_counts": {"discovery": 0, "monitor": 0},
             "reliability_gate": {"passed": True, "failed": False, "reason": "no_seeds"},
+            "net_new_gate": {"passed": True, "failed": False, "reason": "no_work", "new_leads_count": 0},
         }
         self._write_last_run_manifest(report)
+        self._write_daily_growth_summary(report)
         return report
