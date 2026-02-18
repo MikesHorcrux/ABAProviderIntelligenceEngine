@@ -113,7 +113,20 @@ def _best_contact(con, location_pk: str) -> tuple[str, str, str]:
         SELECT full_name, role, email
         FROM contacts
         WHERE location_pk = ? AND COALESCE(deleted_at,'')=''
-        ORDER BY confidence DESC, updated_at DESC
+        ORDER BY
+          CASE
+            WHEN lower(role) LIKE '%owner%' THEN 0
+            WHEN lower(role) LIKE '%general manager%' THEN 1
+            WHEN lower(role) LIKE '%store manager%' THEN 2
+            WHEN lower(role) LIKE '%operations manager%' THEN 3
+            WHEN lower(role) LIKE '%manager%' THEN 4
+            WHEN lower(role) LIKE '%buyer%' THEN 5
+            WHEN lower(role) LIKE '%purchasing%' THEN 6
+            WHEN lower(role) LIKE '%inventory%' THEN 7
+            ELSE 9
+          END ASC,
+          confidence DESC,
+          updated_at DESC
         LIMIT 1
         """,
         (location_pk,),
@@ -168,6 +181,8 @@ def _has_buyer_contact(con, location_pk: str) -> bool:
             OR lower(role) LIKE '%inventory%'
             OR lower(role) LIKE '%owner%'
             OR lower(role) LIKE '%operations%'
+            OR lower(role) LIKE '%manager%'
+            OR lower(role) LIKE '%gm%'
           )
         LIMIT 1
         """,
