@@ -17,6 +17,8 @@ from pipeline.stages.resolve import ResolvedLocation, resolve_and_upsert_locatio
 from pipeline.stages.enrich import run_waterfall_enrichment
 from pipeline.stages.score import run_score
 from pipeline.stages.export import (
+    _copy_latest_csv,
+    _csv_row_count,
     export_buyer_signal_queue,
     export_merge_suggestions,
     export_new_leads,
@@ -750,6 +752,18 @@ class PipelineRunner:
             limit=signal_limit,
             run_id=self.job_id,
         )
+
+        stable_new = OUT_DIR / "new_leads_only.csv"
+        stable_callable = OUT_DIR / "callable_leads.csv"
+        _copy_latest_csv(Path(new_leads), stable_new)
+        _copy_latest_csv(Path(signal_path), stable_callable)
+        discovery_metrics = {
+            "new_leads_count": _csv_row_count(Path(new_leads)),
+            "callable_leads_count": _csv_row_count(Path(signal_path)),
+            "new_leads_only_file": str(stable_new),
+            "callable_leads_file": str(stable_callable),
+        }
+
         con.close()
         return {
             "outreach": result,
@@ -758,6 +772,7 @@ class PipelineRunner:
             "quality": quality,
             "new_leads": new_leads,
             "buying_signal_watchlist": signal_path,
+            "discovery_metrics": discovery_metrics,
         }
 
     def run_quality(self) -> dict[str, object]:
