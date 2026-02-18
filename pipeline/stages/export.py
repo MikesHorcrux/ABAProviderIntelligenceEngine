@@ -113,7 +113,20 @@ def _best_contact(con, location_pk: str) -> tuple[str, str, str]:
         SELECT full_name, role, email
         FROM contacts
         WHERE location_pk = ? AND COALESCE(deleted_at,'')=''
-        ORDER BY confidence DESC, updated_at DESC
+        ORDER BY
+          CASE
+            WHEN lower(role) LIKE '%owner%' THEN 0
+            WHEN lower(role) LIKE '%general manager%' THEN 1
+            WHEN lower(role) LIKE '%store manager%' THEN 2
+            WHEN lower(role) LIKE '%operations manager%' THEN 3
+            WHEN lower(role) LIKE '%manager%' THEN 4
+            WHEN lower(role) LIKE '%buyer%' THEN 5
+            WHEN lower(role) LIKE '%purchasing%' THEN 6
+            WHEN lower(role) LIKE '%inventory%' THEN 7
+            ELSE 9
+          END ASC,
+          confidence DESC,
+          updated_at DESC
         LIMIT 1
         """,
         (location_pk,),
@@ -168,6 +181,8 @@ def _has_buyer_contact(con, location_pk: str) -> bool:
             OR lower(role) LIKE '%inventory%'
             OR lower(role) LIKE '%owner%'
             OR lower(role) LIKE '%operations%'
+            OR lower(role) LIKE '%manager%'
+            OR lower(role) LIKE '%gm%'
           )
         LIMIT 1
         """,
@@ -218,6 +233,20 @@ def _active_score(con, loc_pk: str) -> tuple[int, str]:
     return int(row["score_total"] or 0), row["tier"] or "C"
 
 
+
+
+def _csv_row_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        return sum(1 for _ in reader)
+
+
+def _copy_latest_csv(src: Path, dest: Path) -> None:
+    if not src.exists():
+        return
+    dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
 def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_id: str = "") -> dict[str, str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
