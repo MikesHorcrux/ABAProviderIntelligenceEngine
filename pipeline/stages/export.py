@@ -218,6 +218,20 @@ def _active_score(con, loc_pk: str) -> tuple[int, str]:
     return int(row["score_total"] or 0), row["tier"] or "C"
 
 
+
+
+def _csv_row_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        return sum(1 for _ in reader)
+
+
+def _copy_latest_csv(src: Path, dest: Path) -> None:
+    if not src.exists():
+        return
+    dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
 def export_outreach(con, out_dir: Path, tier: str = "A", limit: int = 200, run_id: str = "") -> dict[str, str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
