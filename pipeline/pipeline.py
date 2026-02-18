@@ -261,16 +261,38 @@ class PipelineRunner:
         sources: list[tuple[str, str, int]] = []
         main_path = self._resolve_seed_path(self.seeds_path)
         if main_path:
-            sources.append((main_path, "seed_file", 100))
+            sources.append((main_path, "seed_file", 80))
         discovery_path = self._resolve_seed_path(self.config.discovery_seed_file)
         if discovery_path:
-            sources.append((discovery_path, "discovery_file", 60))
+            sources.append((discovery_path, "discovery_file", 120))
 
         con = connect_db(self.db_path, SCHEMA_PATH)
+        active_domains = self._active_domains(con)
+        recently_crawled_domains = {
+            normalize_domain(row["website_domain"] or "")
+            for row in con.execute(
+                """
+                SELECT DISTINCT website_domain
+                FROM locations
+                WHERE COALESCE(deleted_at,'')=''
+                  AND COALESCE(last_crawled_at,'')<>''
+                  AND datetime(last_crawled_at) >= datetime('now', '-72 hours')
+                """
+            ).fetchall()
+            if normalize_domain(row["website_domain"] or "")
+        }
+
         items: list[DiscoverySeed] = []
         for path, source, priority in sources:
             batch = load_seeds(path, source=source, priority=priority)
             for seed in batch.seeds:
+                domain = normalize_domain(seed.website)
+                if domain and domain in active_domains:
+                    self.metrics.inc("seeds_skipped_existing")
+                    continue
+                if domain and domain in recently_crawled_domains:
+                    self.metrics.inc("seeds_skipped_recent_crawl")
+                    continue
                 if self._is_seed_in_backoff(con, seed):
                     self.logger.warning(
                         "Seed in cooldown; skipping for now",
@@ -285,6 +307,8 @@ class PipelineRunner:
                     continue
                 items.append(seed)
         con.close()
+
+        items = sorted(items, key=lambda s: (s.priority, s.source == "inbound_seed", s.name.lower()), reverse=True)
         dedupe_limit = self.max_pages if seed_limit is None else seed_limit
         return dedupe_seeds(items, limit=dedupe_limit)
 
