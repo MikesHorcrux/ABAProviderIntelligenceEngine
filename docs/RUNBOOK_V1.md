@@ -144,3 +144,68 @@ For deterministic changes:
 - Diff artifacts are generated with normalized keys.
 - Quality report includes non-empty freshness buckets and menu provider list.
 - Latest manifest references executed seed and config paths.
+
+## Discovery troubleshooting quick-loop (high signal)
+
+Use this loop when discovery quality drops (irrelevant results, duplicates, weak fit).
+
+1) Capture baseline before changes
+
+```bash
+python3 cannaradar_cli.py quality:report
+ls -1t out/research_queue.csv out/outreach_dispensary_100.csv out/quality_report.json 2>/dev/null
+```
+
+2) Validate discovery seed quality
+
+```bash
+head -n 20 discoveries.csv
+python3 - <<'PY'
+import csv
+from collections import Counter
+rows=list(csv.DictReader(open('discoveries.csv', newline='', encoding='utf-8')))
+print('rows',len(rows))
+print('missing_website',sum(1 for r in rows if not (r.get('website') or '').strip()))
+print('duplicate_websites',len(rows)-len({(r.get('website') or '').strip().lower() for r in rows if (r.get('website') or '').strip()}))
+print('states_top5',Counter((r.get('state') or '').strip() for r in rows).most_common(5))
+PY
+```
+
+3) Run constrained discovery test
+
+```bash
+CANNARADAR_MAX_SEEDS=50 ./run_v4.sh
+```
+
+4) Check for noisy outputs
+
+```bash
+python3 - <<'PY'
+import csv
+from collections import Counter
+rows=list(csv.DictReader(open('out/research_queue.csv', newline='', encoding='utf-8')))
+print('research_rows',len(rows))
+print('top_domains',Counter((r.get('website') or '').split('/')[0] for r in rows).most_common(10))
+PY
+```
+
+5) If noise is high, tighten inputs (in order)
+
+- Remove weak/empty seeds from `discoveries.csv`.
+- Add known low-signal domains to `CANNARADAR_DENYLIST`.
+- Reduce discovery breadth with `CANNARADAR_MAX_SEEDS` for validation runs.
+- Re-run and compare `out/quality_report.json` before/after.
+
+6) Rollback if quality regresses
+
+```bash
+cp data/cannaradar_v1.db data/cannaradar_v1.db.rollback.$(date +%Y%m%d-%H%M%S)
+# restore previous known-good backup if needed
+```
+
+Success criteria for discovery fix runs:
+
+- Fewer irrelevant entries in `out/research_queue.csv`
+- Stable/clean dispensary list in `out/outreach_dispensary_100.csv`
+- No spike in merge noise (`out/merge_suggestions_<timestamp>.csv`)
+
