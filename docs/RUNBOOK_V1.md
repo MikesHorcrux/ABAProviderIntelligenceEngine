@@ -55,6 +55,37 @@ python3 jobs/export_changes.py --run-id "$(date +%Y%m%d-%H%M%S)"
 python3 jobs/log_outreach_event.py --website curaleaf.com --channel email --outcome replied --notes "Left voicemail"
 ```
 
+### Seed hygiene cleanup
+
+Run before crawl runs when `seeds.csv` has drift/duplicates:
+
+```bash
+python3 tools/seed_hygiene.py
+```
+
+Outputs:
+
+- `out/seeds_clean.csv` (rows with missing website removed, website/domain normalized, deduped by normalized website)
+- `out/seed_hygiene_report.json` (counts and paths)
+
+### Discovery ranking signals
+
+Run after seed hygiene (or directly against `seeds.csv`) to produce a ranked discovery input using simple metadata signals:
+
+```bash
+python3 tools/discovery_rank_signals.py
+```
+
+Behavior:
+
+- Reads `out/seeds_clean.csv` when present, otherwise `seeds.csv`.
+- Scores each row using `has_state`, `has_market`, `known_mso_name_match`, and `website_quality` (HTTPS + non-placeholder domain).
+
+Outputs:
+
+- `out/discovery_ranked.csv` (input rows + `rank_score` + `rank_reasons`, sorted by `rank_score` descending)
+- `out/discovery_rank_report.json` (score distribution and summary stats)
+
 ## Expected file outputs
 
 - `out/outreach_ready_<YYYYMMDD-HHMMSS>.csv`
@@ -208,4 +239,3 @@ Success criteria for discovery fix runs:
 - Fewer irrelevant entries in `out/research_queue.csv`
 - Stable/clean dispensary list in `out/outreach_dispensary_100.csv`
 - No spike in merge noise (`out/merge_suggestions_<timestamp>.csv`)
-
