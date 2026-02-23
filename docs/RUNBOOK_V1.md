@@ -68,6 +68,24 @@ Outputs:
 - `out/seeds_clean.csv` (rows with missing website removed, website/domain normalized, deduped by normalized website)
 - `out/seed_hygiene_report.json` (counts and paths)
 
+### Discovery ranking signals
+
+Run after seed hygiene (or directly against `seeds.csv`) to produce a ranked discovery input using simple metadata signals:
+
+```bash
+python3 tools/discovery_rank_signals.py
+```
+
+Behavior:
+
+- Reads `out/seeds_clean.csv` when present, otherwise `seeds.csv`.
+- Scores each row using `has_state`, `has_market`, `known_mso_name_match`, and `website_quality` (HTTPS + non-placeholder domain).
+
+Outputs:
+
+- `out/discovery_ranked.csv` (input rows + `rank_score` + `rank_reasons`, sorted by `rank_score` descending)
+- `out/discovery_rank_report.json` (score distribution and summary stats)
+
 ## Expected file outputs
 
 - `out/outreach_ready_<YYYYMMDD-HHMMSS>.csv`
