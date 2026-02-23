@@ -55,6 +55,19 @@ python3 jobs/export_changes.py --run-id "$(date +%Y%m%d-%H%M%S)"
 python3 jobs/log_outreach_event.py --website curaleaf.com --channel email --outcome replied --notes "Left voicemail"
 ```
 
+### Seed hygiene cleanup
+
+Run before crawl runs when `seeds.csv` has drift/duplicates:
+
+```bash
+python3 tools/seed_hygiene.py
+```
+
+Outputs:
+
+- `out/seeds_clean.csv` (rows with missing website removed, website/domain normalized, deduped by normalized website)
+- `out/seed_hygiene_report.json` (counts and paths)
+
 ## Expected file outputs
 
 - `out/outreach_ready_<YYYYMMDD-HHMMSS>.csv`
@@ -208,4 +221,3 @@ Success criteria for discovery fix runs:
 - Fewer irrelevant entries in `out/research_queue.csv`
 - Stable/clean dispensary list in `out/outreach_dispensary_100.csv`
 - No spike in merge noise (`out/merge_suggestions_<timestamp>.csv`)
-
