@@ -3,6 +3,12 @@ set -euo pipefail
 
 BASE="$(cd "$(dirname "$0")" && pwd)"
 cd "$BASE"
+PYTHON_BIN="python3.11"
+
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  echo "python3.11 is required for the Crawlee fetch runtime." >&2
+  exit 1
+fi
 
 OUT_DIR="$BASE/out"
 STATE_DIR="$BASE/data/state"
@@ -26,6 +32,10 @@ CRAWL_WEEKLY_NEW_LEAD_TARGET="${CANNARADAR_WEEKLY_NEW_LEAD_TARGET:-}"
 CRAWL_GROWTH_WINDOW_DAYS="${CANNARADAR_GROWTH_WINDOW_DAYS:-}"
 CRAWL_GOVERNOR_SWITCH="${CANNARADAR_ENFORCE_GROWTH_GOVERNOR:-}"
 CRAWL_REQUIRE_FETCH_SUCCESS_GATE="${CANNARADAR_REQUIRE_FETCH_SUCCESS_GATE:-}"
+CRAWLEE_PROXY_URLS="${CANNARADAR_CRAWLEE_PROXY_URLS:-}"
+CRAWLEE_HEADLESS="${CANNARADAR_CRAWLEE_HEADLESS:-}"
+CRAWLEE_MAX_BROWSER_PAGES="${CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN:-}"
+CRAWLEE_DOMAIN_POLICIES_FILE="${CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE:-}"
 
 mkdir -p "$OUT_DIR" "$STATE_DIR"
 
@@ -38,7 +48,7 @@ trap 'cleanup' EXIT
 
 if ! command -v flock >/dev/null 2>&1; then
   if [ -f "$LOCK_FILE" ]; then
-    lock_age="$(python3 - <<PY
+    lock_age="$("$PYTHON_BIN" - <<PY
 import os, time
 print(int(time.time() - os.path.getmtime('$LOCK_FILE')))
 PY
@@ -59,10 +69,10 @@ else
 fi
 
 if [ "${CANNARADAR_RUN_CANONICAL_INGEST:-0}" = "1" ]; then
-  PYTHONPATH="$BASE" python3 jobs/ingest_sources.py
+  PYTHONPATH="$BASE" "$PYTHON_BIN" jobs/ingest_sources.py
 fi
 
-seed_file="$(python3 - <<PY
+seed_file="$("$PYTHON_BIN" - <<PY
 import json, os
 from pathlib import Path
 
@@ -146,11 +156,23 @@ fi
 if [ -n "$CRAWL_REQUIRE_FETCH_SUCCESS_GATE" ]; then
   export CANNARADAR_REQUIRE_FETCH_SUCCESS_GATE="$CRAWL_REQUIRE_FETCH_SUCCESS_GATE"
 fi
+if [ -n "$CRAWLEE_PROXY_URLS" ]; then
+  export CANNARADAR_CRAWLEE_PROXY_URLS="$CRAWLEE_PROXY_URLS"
+fi
+if [ -n "$CRAWLEE_HEADLESS" ]; then
+  export CANNARADAR_CRAWLEE_HEADLESS="$CRAWLEE_HEADLESS"
+fi
+if [ -n "$CRAWLEE_MAX_BROWSER_PAGES" ]; then
+  export CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN="$CRAWLEE_MAX_BROWSER_PAGES"
+fi
+if [ -n "$CRAWLEE_DOMAIN_POLICIES_FILE" ]; then
+  export CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE="$CRAWLEE_DOMAIN_POLICIES_FILE"
+fi
 
-python3 cannaradar_cli.py crawl:run --seeds "$seed_file" "${crawl_args[@]}" --export-tier A --export-limit 200
-python3 jobs/export_changes.py --run-id "$RUN_ID"
+"$PYTHON_BIN" cannaradar_cli.py crawl:run --seeds "$seed_file" "${crawl_args[@]}" --export-tier A --export-limit 200
+"$PYTHON_BIN" jobs/export_changes.py --run-id "$RUN_ID"
 
-python3 - <<PY
+"$PYTHON_BIN" - <<PY
 import csv
 import hashlib
 import json
@@ -218,7 +240,7 @@ manifest.write_text(json.dumps(run_payload, indent=2))
 print(json.dumps(run_payload, indent=2))
 PY
 
-python3 - <<PY
+"$PYTHON_BIN" - <<PY
 import csv
 from pathlib import Path
 path = Path('$OUT_DIR') / 'outreach_dispensary_100.csv'

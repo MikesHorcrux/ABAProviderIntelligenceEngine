@@ -63,6 +63,18 @@ class CrawlConfig:
         ]
     )
     max_concurrency: int = 1
+    crawlee_headless: bool = True
+    crawlee_browser_type: str = "chromium"
+    crawlee_proxy_urls: list[str] = field(default_factory=list)
+    crawlee_use_session_pool: bool = True
+    crawlee_retry_on_blocked: bool = True
+    crawlee_max_session_rotations: int = 8
+    crawlee_viewport_width: int = 1280
+    crawlee_viewport_height: int = 1024
+    crawlee_max_browser_pages_per_domain: int = 5
+    crawlee_extra_block_patterns: list[str] = field(default_factory=list)
+    crawlee_domain_policies_file: str = "fetch_policies.json"
+    config_path: str = str(DEFAULT_CONFIG_PATH)
 
     def merged_denylist(self) -> set[str]:
         values = list(self.denylist)
@@ -74,11 +86,28 @@ class CrawlConfig:
     def merged_schemes(self) -> set[str]:
         return {str(s).strip().lower() for s in self.allowed_schemes if str(s).strip()}
 
+    def resolve_runtime_path(self, value: str) -> Path:
+        candidate = Path(value)
+        if candidate.is_absolute():
+            return candidate.resolve()
+        return (Path(self.config_path).resolve().parent / candidate).resolve()
+
+    def resolved_crawlee_domain_policies_path(self) -> Path:
+        return self.resolve_runtime_path(self.crawlee_domain_policies_file)
+
 
 def _coalesce_list(value: object, default: list[str]) -> list[str]:
     if not isinstance(value, list):
         return default.copy()
     return [str(v).strip() for v in value if str(v).strip()]
+
+
+def _coalesce_csv_list(value: object, default: list[str]) -> list[str]:
+    if value is None:
+        return default.copy()
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [chunk.strip() for chunk in str(value).split(",") if chunk.strip()]
 
 
 def _coerce_bool(value: object, default: bool) -> bool:
@@ -92,9 +121,15 @@ def _coerce_bool(value: object, default: bool) -> bool:
     return text not in {"0", "false", "no", "off", "n"}
 
 
+def _coerce_optional_int(value: object, default: int | None) -> int | None:
+    if value is None or str(value).strip() == "":
+        return default
+    return int(value)
+
+
 def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
     defaults = CrawlConfig()
-    cfg_path = Path(path or os.environ.get("CANNARADAR_CRAWLER_CONFIG") or DEFAULT_CONFIG_PATH)
+    cfg_path = Path(path or os.environ.get("CANNARADAR_CRAWLER_CONFIG") or DEFAULT_CONFIG_PATH).resolve()
     default_seed = os.environ.get("CANNARADAR_SEED_FILE", defaults.seed_file)
     discovery_seed = os.environ.get("CANNARADAR_DISCOVERY_FILE", defaults.discovery_seed_file)
     seed_failure_streak_limit = os.environ.get("CANNARADAR_SEED_FAILURE_STREAK_LIMIT")
@@ -108,11 +143,19 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
     output_stale_hours = os.environ.get("CANNARADAR_OUTPUT_STALE_HOURS")
     retry_base_delay_seconds = os.environ.get("CANNARADAR_RETRY_BASE_DELAY_SECONDS")
     retry_factor = os.environ.get("CANNARADAR_RETRY_FACTOR")
+    crawlee_headless = os.environ.get("CANNARADAR_CRAWLEE_HEADLESS")
+    crawlee_proxy_urls = os.environ.get("CANNARADAR_CRAWLEE_PROXY_URLS")
+    crawlee_max_browser_pages = os.environ.get("CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN")
+    crawlee_domain_policies_file = os.environ.get("CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE")
 
     if not cfg_path.exists():
-        return CrawlConfig(seed_file=default_seed)
+        return CrawlConfig(
+            seed_file=default_seed,
+            discovery_seed_file=discovery_seed,
+            config_path=str(cfg_path),
+        )
 
-    with cfg_path.open() as f:
+    with cfg_path.open(encoding="utf-8") as f:
         data = json.loads(f.read())
 
     return CrawlConfig(
@@ -123,8 +166,8 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
         crawl_delay_seconds=float(data.get("crawlDelaySeconds", defaults.crawl_delay_seconds)),
         max_depth=int(data.get("maxDepth", defaults.max_depth)),
         max_pages_per_domain=int(data.get("maxPagesPerDomain", defaults.max_pages_per_domain)),
-        max_total_pages=data.get("maxTotalPages"),
-        respect_robots=bool(data.get("respectRobots", defaults.respect_robots)),
+        max_total_pages=_coerce_optional_int(data.get("maxTotalPages"), defaults.max_total_pages),
+        respect_robots=_coerce_bool(data.get("respectRobots"), defaults.respect_robots),
         allowed_schemes=_coalesce_list(data.get("allowedSchemes"), defaults.allowed_schemes),
         denylist=_coalesce_list(data.get("denylist"), defaults.denylist),
         seed_file=str(data.get("seedFile", default_seed)),
@@ -180,6 +223,44 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
         extra_paths=_coalesce_list(data.get("extraPaths"), defaults.extra_paths),
         role_keywords=_coalesce_list(data.get("roleKeywords"), defaults.role_keywords),
         max_concurrency=max(1, int(data.get("maxConcurrency", defaults.max_concurrency))),
+        crawlee_headless=_coerce_bool(
+            crawlee_headless,
+            _coerce_bool(data.get("crawleeHeadless"), defaults.crawlee_headless),
+        ),
+        crawlee_browser_type=str(data.get("crawleeBrowserType", defaults.crawlee_browser_type)),
+        crawlee_proxy_urls=_coalesce_csv_list(
+            crawlee_proxy_urls if crawlee_proxy_urls is not None else data.get("crawleeProxyUrls"),
+            defaults.crawlee_proxy_urls,
+        ),
+        crawlee_use_session_pool=_coerce_bool(
+            data.get("crawleeUseSessionPool"),
+            defaults.crawlee_use_session_pool,
+        ),
+        crawlee_retry_on_blocked=_coerce_bool(
+            data.get("crawleeRetryOnBlocked"),
+            defaults.crawlee_retry_on_blocked,
+        ),
+        crawlee_max_session_rotations=int(
+            data.get("crawleeMaxSessionRotations", defaults.crawlee_max_session_rotations)
+        ),
+        crawlee_viewport_width=int(data.get("crawleeViewportWidth", defaults.crawlee_viewport_width)),
+        crawlee_viewport_height=int(data.get("crawleeViewportHeight", defaults.crawlee_viewport_height)),
+        crawlee_max_browser_pages_per_domain=max(
+            1,
+            int(
+                crawlee_max_browser_pages
+                or data.get("crawleeMaxBrowserPagesPerDomain", defaults.crawlee_max_browser_pages_per_domain)
+            ),
+        ),
+        crawlee_extra_block_patterns=_coalesce_list(
+            data.get("crawleeExtraBlockPatterns"),
+            defaults.crawlee_extra_block_patterns,
+        ),
+        crawlee_domain_policies_file=str(
+            crawlee_domain_policies_file
+            or data.get("crawleeDomainPoliciesFile", defaults.crawlee_domain_policies_file)
+        ),
+        config_path=str(cfg_path),
     )
 
 

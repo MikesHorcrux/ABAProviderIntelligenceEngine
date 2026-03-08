@@ -1,10 +1,16 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from pipeline.pipeline import PipelineRunner
+
+
+def _require_python_311() -> None:
+    if sys.version_info < (3, 11):
+        raise SystemExit("CannaRadar requires Python 3.11+ for the Crawlee fetch runtime.")
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -32,6 +38,10 @@ def make_parser() -> argparse.ArgumentParser:
     crawl.add_argument("--growth-window-days", type=int, default=None)
     crawl.add_argument("--growth-governor", type=str, default=None, choices=["on", "off"])
     crawl.add_argument("--enforce-fetch-gate", type=str, default=None, choices=["on", "off"])
+    crawl.add_argument("--crawlee-headless", type=str, default=None, choices=["on", "off"])
+    crawl.add_argument("--crawlee-proxy-urls", default=None)
+    crawl.add_argument("--crawlee-max-browser-pages", type=int, default=None)
+    crawl.add_argument("--crawlee-domain-policies-file", default=None)
 
     enrich = sub.add_parser("enrich:run", help="Re-run enrichment stage (from crawl results)")
     enrich.add_argument("--since", default=None, help='ISO timestamp, e.g. "2026-02-17T00:00:00"')
@@ -59,11 +69,12 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    _require_python_311()
     parser = make_parser()
     args = parser.parse_args()
 
-    runner = PipelineRunner(db_path=args.db)
     if args.command == "crawl:run":
+        runner = PipelineRunner(seeds=args.seeds, db_path=args.db)
         runner.max_pages = args.max
         if args.weekly_lead_target is not None:
             runner.config.weekly_new_lead_target = args.weekly_lead_target
@@ -73,6 +84,16 @@ def main() -> None:
             runner.config.enforce_growth_governor = args.growth_governor == "on"
         if args.enforce_fetch_gate is not None:
             runner.config.require_fetch_success_gate = args.enforce_fetch_gate == "on"
+        if args.crawlee_headless is not None:
+            runner.config.crawlee_headless = args.crawlee_headless == "on"
+        if args.crawlee_proxy_urls is not None:
+            runner.config.crawlee_proxy_urls = [
+                item.strip() for item in args.crawlee_proxy_urls.split(",") if item.strip()
+            ]
+        if args.crawlee_max_browser_pages is not None:
+            runner.config.crawlee_max_browser_pages_per_domain = max(1, args.crawlee_max_browser_pages)
+        if args.crawlee_domain_policies_file is not None:
+            runner.config.crawlee_domain_policies_file = args.crawlee_domain_policies_file
         result = runner.run_crawl(
             seed_limit=args.max,
             crawl_mode=args.crawl_mode,
@@ -89,6 +110,7 @@ def main() -> None:
         print(f"Crawl run completed: {result}")
         return
 
+    runner = PipelineRunner(db_path=args.db)
     if args.command == "enrich:run":
         updated = runner.run_enrich(since=args.since)
         print(f"Enriched locations: {len(updated)}")

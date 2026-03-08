@@ -6,9 +6,12 @@ This runbook is the operator source of truth for running, validating, and recove
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11+
+- `pip install -r requirements.txt`
+- `playwright install chromium`
 - SQLite write access under `data/`
 - `crawler_config.json` present and valid JSON
+- `fetch_policies.json` present or referenced by `crawleeDomainPoliciesFile`
 - Seed source available (`--seeds` or environment override)
 
 ## Standard environment variables
@@ -18,6 +21,10 @@ This runbook is the operator source of truth for running, validating, and recove
 - `CANNARADAR_DENYLIST`: comma-separated domains to skip.
 - `CANNARADAR_MAX_SEEDS`: optional run-time seed cap.
 - `CANNARADAR_RUN_CANONICAL_INGEST`: set `1` to run migration/bootstrap before crawl in `run_v4.sh`.
+- `CANNARADAR_CRAWLEE_PROXY_URLS`: comma-separated proxy URLs for Crawlee.
+- `CANNARADAR_CRAWLEE_HEADLESS`: `on|off` browser headless toggle.
+- `CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN`: per-domain Playwright cap.
+- `CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE`: alternate domain policy file path.
 
 ## Run modes
 
@@ -39,20 +46,20 @@ What it performs:
 ### Stage-only runs
 
 ```bash
-python3 cannaradar_cli.py crawl:run --seeds seeds.csv
-python3 cannaradar_cli.py enrich:run --since "2026-02-17T00:00:00"
-python3 cannaradar_cli.py score:run
-python3 cannaradar_cli.py export:outreach --tier A --limit 200
-python3 cannaradar_cli.py export:research --limit 200
-python3 cannaradar_cli.py quality:report
+python3.11 cannaradar_cli.py crawl:run --seeds seeds.csv
+python3.11 cannaradar_cli.py enrich:run --since "2026-02-17T00:00:00"
+python3.11 cannaradar_cli.py score:run
+python3.11 cannaradar_cli.py export:outreach --tier A --limit 200
+python3.11 cannaradar_cli.py export:research --limit 200
+python3.11 cannaradar_cli.py quality:report
 ```
 
 ### Maintenance runs
 
 ```bash
-PYTHONPATH=$PWD python3 jobs/ingest_sources.py
-python3 jobs/export_changes.py --run-id "$(date +%Y%m%d-%H%M%S)"
-python3 jobs/log_outreach_event.py --website curaleaf.com --channel email --outcome replied --notes "Left voicemail"
+PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py
+python3.11 jobs/export_changes.py --run-id "$(date +%Y%m%d-%H%M%S)"
+python3.11 jobs/log_outreach_event.py --website curaleaf.com --channel email --outcome replied --notes "Left voicemail"
 ```
 
 ### Seed hygiene cleanup
@@ -60,7 +67,7 @@ python3 jobs/log_outreach_event.py --website curaleaf.com --channel email --outc
 Run before crawl runs when `seeds.csv` has drift/duplicates:
 
 ```bash
-python3 tools/seed_hygiene.py
+python3.11 tools/seed_hygiene.py
 ```
 
 Outputs:
@@ -73,7 +80,7 @@ Outputs:
 Run after seed hygiene (or directly against `seeds.csv`) to produce a ranked discovery input using simple metadata signals:
 
 ```bash
-python3 tools/discovery_rank_signals.py
+python3.11 tools/discovery_rank_signals.py
 ```
 
 Behavior:
@@ -105,6 +112,7 @@ Outputs:
 - Ensure seed file exists and has `name,website,state,market` header.
 - Verify `CANNARADAR_DENYLIST` does not include required domains.
 - Confirm robots access by checking fetch logs for blocked URLs.
+- Confirm `fetch_policies.json` contains exact normalized domains only for any browser-only overrides.
 
 ## Post-run checks
 
@@ -130,7 +138,7 @@ If bootstrap fails:
 2. Backup current DB:
    `cp data/cannaradar_v1.db data/cannaradar_v1.db.<timestamp>.bak`
 3. Restore previous known-good DB.
-4. Re-run `PYTHONPATH=$PWD python3 jobs/ingest_sources.py`.
+4. Re-run `PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py`.
 5. Re-run the target pipeline command.
 
 ## Recovery playbook
@@ -145,7 +153,7 @@ If bootstrap fails:
 
 - Inspect segment rule inputs in `pipeline/stages/export.py`.
 - Verify extraction is correctly mapping `website` and `canonical_name`.
-- Re-run `python3 cannaradar_cli.py export:outreach --tier A --limit 200` after fixes.
+- Re-run `python3.11 cannaradar_cli.py export:outreach --tier A --limit 200` after fixes.
 
 ### Empty score output
 
@@ -183,7 +191,7 @@ Use this loop when discovery quality drops (irrelevant results, duplicates, weak
 1) Capture baseline before changes
 
 ```bash
-python3 cannaradar_cli.py quality:report
+python3.11 cannaradar_cli.py quality:report
 ls -1t out/research_queue.csv out/outreach_dispensary_100.csv out/quality_report.json 2>/dev/null
 ```
 
@@ -191,7 +199,7 @@ ls -1t out/research_queue.csv out/outreach_dispensary_100.csv out/quality_report
 
 ```bash
 head -n 20 discoveries.csv
-python3 - <<'PY'
+python3.11 - <<'PY'
 import csv
 from collections import Counter
 rows=list(csv.DictReader(open('discoveries.csv', newline='', encoding='utf-8')))
@@ -211,7 +219,7 @@ CANNARADAR_MAX_SEEDS=50 ./run_v4.sh
 4) Check for noisy outputs
 
 ```bash
-python3 - <<'PY'
+python3.11 - <<'PY'
 import csv
 from collections import Counter
 rows=list(csv.DictReader(open('out/research_queue.csv', newline='', encoding='utf-8')))

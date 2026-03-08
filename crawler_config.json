@@ -27,5 +27,16 @@
   "failOnZeroNewLeads": false,
   "outputStaleHours": 72,
   "seedFailureStreakLimit": 3,
-  "seedBackoffHours": 24
+  "seedBackoffHours": 24,
+  "crawleeHeadless": true,
+  "crawleeBrowserType": "chromium",
+  "crawleeProxyUrls": [],
+  "crawleeUseSessionPool": true,
+  "crawleeRetryOnBlocked": true,
+  "crawleeMaxSessionRotations": 8,
+  "crawleeViewportWidth": 1280,
+  "crawleeViewportHeight": 1024,
+  "crawleeMaxBrowserPagesPerDomain": 5,
+  "crawleeExtraBlockPatterns": [],
+  "crawleeDomainPoliciesFile": "fetch_policies.json"
 }

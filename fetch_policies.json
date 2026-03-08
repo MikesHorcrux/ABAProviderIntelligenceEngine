@@ -1,0 +1,11 @@
+{
+  "default": {
+    "mode": "http_then_browser_on_block",
+    "waitForSelector": "",
+    "extraBlockPatterns": [],
+    "maxPagesPerDomain": null,
+    "maxDepth": null,
+    "browserOnBlock": true
+  },
+  "domains": {}
+}
