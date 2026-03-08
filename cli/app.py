@@ -132,8 +132,8 @@ def make_parser() -> argparse.ArgumentParser:
     sql.add_argument("--query", dest="query_flag", default=None)
     sql.add_argument("--limit", type=int, default=200)
 
-    export = sub.add_parser("export", help="Export outreach, research, agent research, new leads, signals, or quality outputs.")
-    export.add_argument("--kind", default="all", choices=["all", "outreach", "research", "agent-research", "new", "signals", "quality"])
+    export = sub.add_parser("export", help="Export outreach, intelligence, research, agent research, new leads, signals, or quality outputs.")
+    export.add_argument("--kind", default="all", choices=["all", "outreach", "intelligence", "research", "agent-research", "new", "signals", "quality"])
     export.add_argument("--tier", default="A")
     export.add_argument("--limit", type=int, default=200)
     export.add_argument("--research-limit", type=int, default=200)
@@ -157,6 +157,10 @@ def make_parser() -> argparse.ArgumentParser:
     export_research = sub.add_parser("export:research", help=argparse.SUPPRESS)
     export_research.add_argument("--limit", type=int, default=200)
 
+    export_intelligence = sub.add_parser("export:intelligence", help=argparse.SUPPRESS)
+    export_intelligence.add_argument("--tier", default="A")
+    export_intelligence.add_argument("--limit", type=int, default=100)
+
     export_new = sub.add_parser("export:new", help=argparse.SUPPRESS)
     export_new.add_argument("--since", default=None)
     export_new.add_argument("--limit", type=int, default=100)
@@ -175,6 +179,7 @@ def _canonical_command(command: str) -> str:
     mapping = {
         "crawl:run": "sync",
         "export:outreach": "export",
+        "export:intelligence": "export",
         "export:research": "export",
         "export:new": "export",
         "export:signals": "export",
@@ -229,6 +234,13 @@ def _dispatch(args) -> dict[str, object]:
     if command == "export:research":
         args.kind = "research"
         args.research_limit = args.limit
+        args.new_limit = 0
+        args.signal_limit = 0
+        return execute_export(args)
+    if command == "export:intelligence":
+        args.kind = "intelligence"
+        args.research_limit = 0
+        args.agent_research_limit = 0
         args.new_limit = 0
         args.signal_limit = 0
         return execute_export(args)

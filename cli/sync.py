@@ -614,6 +614,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             limit=getattr(args, "limit", 200),
             research_limit=getattr(args, "research_limit", 200),
             agent_research_limit=getattr(args, "agent_research_limit", None),
+            intelligence_limit=getattr(args, "limit", 200),
             since=getattr(args, "since", None),
             new_limit=getattr(args, "new_limit", 100),
             signal_limit=getattr(args, "signal_limit", 200),
@@ -628,6 +629,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
         if agent_research_path.exists():
             with agent_research_path.open(encoding="utf-8") as f:
                 result["agent_research_row_count"] = max(0, sum(1 for _ in f) - 1)
+        result["intelligence_row_count"] = int((result.get("intelligence") or {}).get("row_count") or 0)
         return result
     if kind == "quality":
         return runner.run_quality()
@@ -637,6 +639,17 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             limit=getattr(args, "limit", 200),
             research_limit=0,
             agent_research_limit=0,
+            intelligence_limit=0,
+            new_limit=0,
+            signal_limit=0,
+        )
+    if kind == "intelligence":
+        return runner.run_export(
+            tier=getattr(args, "tier", "A"),
+            limit=0,
+            research_limit=0,
+            agent_research_limit=0,
+            intelligence_limit=getattr(args, "limit", 100),
             new_limit=0,
             signal_limit=0,
         )
@@ -646,6 +659,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             limit=0,
             research_limit=getattr(args, "research_limit", 200),
             agent_research_limit=0,
+            intelligence_limit=0,
             new_limit=0,
             signal_limit=0,
         )
@@ -655,6 +669,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             limit=0,
             research_limit=0,
             agent_research_limit=getattr(args, "agent_research_limit", 200),
+            intelligence_limit=0,
             since=getattr(args, "since", None),
             new_limit=0,
             signal_limit=0,
@@ -665,6 +680,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             limit=0,
             research_limit=0,
             agent_research_limit=0,
+            intelligence_limit=0,
             since=getattr(args, "since", None),
             new_limit=getattr(args, "new_limit", 100),
             signal_limit=0,
@@ -675,6 +691,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             limit=0,
             research_limit=0,
             agent_research_limit=0,
+            intelligence_limit=0,
             since=getattr(args, "since", None),
             new_limit=0,
             signal_limit=getattr(args, "signal_limit", 200),

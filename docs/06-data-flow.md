@@ -166,6 +166,10 @@ Main outputs:
 - excluded non-dispensary CSV
 - research queue CSV
 - agent research queue CSV
+- lead intelligence index CSV
+- lead intelligence table markdown
+- lead intelligence manifest JSON
+- per-lead intelligence packages under `out/lead_intelligence/leads/`
 - merge suggestions CSV
 - new leads CSV
 - buyer signal watchlist CSV
@@ -208,7 +212,13 @@ So if you point the CLI at a temp DB, the system still writes exports to the sha
 - `export_research_queue` is a simpler “missing buyer contact” queue.
 - `export_agent_research_queue` is the richer brief-driven queue.
 
+### Agent research queue vs lead intelligence packages are different
+
+- `export_agent_research_queue` is still a flat queue for triage and follow-up ordering.
+- `export_lead_intelligence_dossier` builds the per-lead package used for deeper dossier work.
+- Per-lead packages are written to the shared repo `out/lead_intelligence/leads/` directory, not into the DB.
+- Those packages are deterministic scaffolds plus agent handoff files; they are not themselves a new canonical table family.
+
 ### Outreach feedback is a sink today
 
 `jobs/log_outreach_event.py` writes `outreach_events`, but there is no current code path that feeds those outcomes back into scoring or lead ranking.
-

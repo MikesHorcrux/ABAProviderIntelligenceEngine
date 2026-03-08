@@ -110,6 +110,7 @@ Used by:
 
 - `pipeline/stages/research.py`
 - `pipeline/stages/export.py:export_agent_research_queue`
+- `pipeline/stages/export.py:export_lead_intelligence_dossier`
 - `cli/sync.py`
 
 ## Crawlee and Browser Behavior
@@ -262,4 +263,3 @@ If you are changing behavior:
 - change `fetch_policies.json` for domain-specific fetch behavior
 - use CLI overrides for one-off runs
 - use env vars when driving the system from `run_v4.sh` or an external scheduler
-

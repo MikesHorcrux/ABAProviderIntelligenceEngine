@@ -148,7 +148,7 @@ python3.11 cannaradar_cli.py status --json
 | `control` | inspect or apply bounded live interventions |
 | `search` | query curated diagnostics and local lead state |
 | `sql` | read-only SQL surface over local SQLite |
-| `export` | generate outreach, research, signal, and quality outputs |
+| `export` | generate outreach, intelligence, research, signal, and quality outputs |
 
 ### Useful control examples
 
@@ -165,6 +165,11 @@ Primary runtime outputs:
 
 - `out/outreach_ready_<run_id>.csv`
 - `out/outreach_dispensary_100.csv`
+- `out/lead_intelligence/lead_intelligence_index.csv`
+- `out/lead_intelligence/lead_intelligence_table.md`
+- `out/lead_intelligence/lead_intelligence_manifest.json`
+- `out/lead_intelligence/leads/<lead-id>-<company>/report.md`
+- `out/lead_intelligence/leads/<lead-id>-<company>/agent_research_prompt.md`
 - `out/research_queue.csv`
 - `out/agent_research_queue.csv`
 - `out/new_leads_only.csv`

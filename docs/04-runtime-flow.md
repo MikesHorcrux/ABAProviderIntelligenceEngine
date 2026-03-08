@@ -230,6 +230,8 @@ Outputs:
 - outreach CSVs
 - research queue CSV
 - agent research queue CSV
+- lead intelligence index/table files
+- per-lead intelligence packages under `out/lead_intelligence/leads/`
 - merge suggestions CSV
 - new leads CSV
 - buyer signal watchlist CSV
@@ -291,4 +293,3 @@ Startup order:
 Important nuance:
 
 Inferred from code, `run_v4.sh` writes its own manifest payload after the CLI run. That means the shape of `data/state/last_run_manifest.json` depends on whether the last run came from direct CLI usage or from the shell wrapper.
-

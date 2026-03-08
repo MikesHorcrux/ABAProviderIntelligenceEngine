@@ -23,6 +23,7 @@ from pipeline.stages.export import (
     _csv_row_count,
     export_agent_research_queue,
     export_buyer_signal_queue,
+    export_lead_intelligence_dossier,
     export_merge_suggestions,
     export_new_leads,
     export_outreach,
@@ -873,6 +874,7 @@ class PipelineRunner:
         new_limit: int = 100,
         signal_limit: int = 200,
         agent_research_limit: int | None = None,
+        intelligence_limit: int | None = None,
     ) -> dict[str, object]:
         con = connect_db(self.db_path, SCHEMA_PATH)
         result = export_outreach(con, OUT_DIR, tier=tier, limit=limit, run_id=self.job_id)
@@ -888,6 +890,18 @@ class PipelineRunner:
                 else int(self.config.agent_research_limit)
             ),
             min_score=self.config.agent_research_min_score,
+            run_id=self.job_id,
+        )
+        intelligence_report = export_lead_intelligence_dossier(
+            con,
+            OUT_DIR,
+            cfg=self.config,
+            tier=tier,
+            limit=(
+                int(intelligence_limit)
+                if intelligence_limit is not None
+                else int(limit)
+            ),
             run_id=self.job_id,
         )
         merge_report = export_merge_suggestions(con, OUT_DIR, run_id=self.job_id)
@@ -923,6 +937,7 @@ class PipelineRunner:
             "outreach": result,
             "research": research_path,
             "agent_research": agent_research_path,
+            "intelligence": intelligence_report,
             "merge_suggestions": merge_report,
             "quality": quality,
             "new_leads": new_leads,

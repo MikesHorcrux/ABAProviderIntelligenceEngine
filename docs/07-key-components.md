@@ -348,6 +348,7 @@ Called by:
 
 - `pipeline/stages/research.py:run_lead_research`
 - `pipeline/stages/export.py:export_agent_research_queue`
+- `pipeline/stages/export.py:export_lead_intelligence_dossier`
 
 Calls:
 
@@ -371,6 +372,8 @@ Responsibility:
 - produce legacy compatibility outputs
 - create new-leads and buyer-signal views
 - generate agent research export
+- generate lead-intelligence index files
+- generate per-lead package scaffolds and agent handoff artifacts
 
 Called by:
 
@@ -384,7 +387,7 @@ Calls:
 Reads/writes:
 
 - reads canonical DB tables
-- writes `out/*.csv`
+- writes `out/*.csv`, `out/*.json`, and markdown package files under `out/lead_intelligence/leads/`
 
 Runtime role:
 
@@ -491,4 +494,3 @@ Runtime role:
 Assumption:
 
 Because only the seeds adapter is enabled, this path is currently more of a schema/bootstrap guardrail than a rich ingestion subsystem.
-

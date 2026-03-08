@@ -231,7 +231,7 @@ flowchart TD
     Parse --> Evidence["evidence"]
     Location --> Score["lead_scores + scoring_features"]
     Score --> Research["agent research evidence + enrichment_sources"]
-    Research --> Export["CSV / JSON outputs"]
+    Research --> Export["CSV / JSON / markdown package outputs"]
 ```
 
 ## Manifest Lifecycle

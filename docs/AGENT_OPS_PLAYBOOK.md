@@ -32,8 +32,8 @@ python3.11 cannaradar_cli.py sync --json --resume latest
 - `control`: bounded runtime interventions for active or resumable runs.
 - `search`: local query surface with text search and curated presets.
 - `sql`: read-only `SELECT` / `WITH` access to local SQLite state.
-- `export`: outreach/research/new/signal/quality outputs.
-- `sync` includes a post-score `research` stage that writes lead research summaries and `out/agent_research_queue.csv`.
+- `export`: outreach/intelligence/research/new/signal/quality outputs.
+- `sync` includes a post-score `research` stage that writes lead research summaries, `out/agent_research_queue.csv`, and per-lead intelligence packages under `out/lead_intelligence/leads/`.
 
 Legacy compatibility commands remain available:
 

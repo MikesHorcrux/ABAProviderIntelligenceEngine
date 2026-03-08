@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.11
 from __future__ import annotations
 
+from argparse import Namespace
 import io
 import json
 import sqlite3
@@ -8,7 +9,8 @@ import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from cli.app import main as cli_main
+from cli.app import main as cli_main, make_parser
+from cli.sync import execute_export
 from pipeline.run_control import ensure_run_control
 from pipeline.run_state import create_run_state, save_run_state
 
@@ -251,9 +253,45 @@ def test_json_usage_error_envelope() -> None:
     assert payload["error"]["code"] == "usage_error"
 
 
+def test_execute_export_supports_intelligence_kind() -> None:
+    args = make_parser().parse_args(["export", "--kind", "intelligence", "--limit", "7", "--tier", "B"])
+    assert args.kind == "intelligence"
+
+    class DummyRunner:
+        def __init__(self, **_kwargs):
+            pass
+
+        def run_export(self, **kwargs):
+            return {
+                "research": "",
+                "agent_research": "",
+                "intelligence": {"row_count": kwargs.get("intelligence_limit")},
+                "echo": kwargs,
+            }
+
+    payload = execute_export(
+        Namespace(
+            kind="intelligence",
+            tier="B",
+            limit=7,
+            research_limit=0,
+            agent_research_limit=0,
+            since=None,
+            new_limit=0,
+            signal_limit=0,
+            db="demo.db",
+        ),
+        runner_factory=DummyRunner,
+    )
+    assert payload["intelligence"]["row_count"] == 7
+    assert payload["echo"]["limit"] == 0
+    assert payload["echo"]["intelligence_limit"] == 7
+
+
 def run() -> None:
     test_init_doctor_sql_and_search()
     test_json_usage_error_envelope()
+    test_execute_export_supports_intelligence_kind()
     print("test_agent_cli: ok")
 
 

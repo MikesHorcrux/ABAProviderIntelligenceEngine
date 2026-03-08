@@ -80,6 +80,8 @@ The score is used to tier and prioritize export output.
 
 An agent research brief is a structured follow-up record built in `pipeline/stages/research.py`. It describes gaps, suggested public paths, target roles, recommended next action, and a summary of current signal quality.
 
+That brief now feeds a per-lead intelligence package under `out/lead_intelligence/leads/`. Each package can include a lead summary JSON file, lead-map CSV, company-strategy markdown, contact profile markdown files, an outreach sequence, and agent handoff files for deeper follow-up research.
+
 ## Runtime Model
 
 The repo is a hybrid of:
@@ -127,4 +129,3 @@ These are absence statements based on what is actually implemented:
 - `pipeline/fetch_backends/crawlee_backend.py:run_fetch`
 
 Those files define the repo’s real execution model.
-

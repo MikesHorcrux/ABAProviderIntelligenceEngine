@@ -222,6 +222,9 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
         "outputs": {
             "research_queue": _file_snapshot(OUT_DIR / "research_queue.csv"),
             "agent_research_queue": _file_snapshot(OUT_DIR / "agent_research_queue.csv"),
+            "lead_intelligence_index": _file_snapshot(OUT_DIR / "lead_intelligence" / "lead_intelligence_index.csv"),
+            "lead_intelligence_table": _file_snapshot(OUT_DIR / "lead_intelligence" / "lead_intelligence_table.md"),
+            "lead_intelligence_manifest": _file_snapshot(OUT_DIR / "lead_intelligence" / "lead_intelligence_manifest.json"),
             "outreach_legacy": _file_snapshot(OUT_DIR / "outreach_dispensary_100.csv"),
             "quality": _file_snapshot(OUT_DIR / "quality_report.json"),
         },

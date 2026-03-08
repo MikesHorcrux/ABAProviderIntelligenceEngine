@@ -210,6 +210,8 @@ Use this area for:
 
 If you actually want external web research or an LLM-assisted enrichment loop, that is a new subsystem, not a tweak to the existing research stage.
 
+Today the repo does include a per-lead handoff scaffold in `out/lead_intelligence/leads/` with agent prompt and packet files. That scaffold is deterministic export output. A fully autonomous external-web research executor that consumes those packets is still a separate subsystem.
+
 ## If You Want To Change Exports
 
 Start in `pipeline/stages/export.py`.
@@ -219,6 +221,8 @@ Use this area for:
 - outreach CSV schema
 - research queue columns
 - agent research queue columns
+- lead-intelligence index/manifest files
+- per-lead package file layout and report scaffolds
 - merge suggestion exports
 - buyer-signal watchlist logic
 - quality report file layout

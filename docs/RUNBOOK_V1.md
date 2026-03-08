@@ -136,6 +136,11 @@ Outputs:
 
 - `out/outreach_ready_<YYYYMMDD-HHMMSS>.csv`
 - `out/outreach_dispensary_100.csv`
+- `out/lead_intelligence/lead_intelligence_index.csv`
+- `out/lead_intelligence/lead_intelligence_table.md`
+- `out/lead_intelligence/lead_intelligence_manifest.json`
+- `out/lead_intelligence/leads/<lead-id>-<company>/report.md`
+- `out/lead_intelligence/leads/<lead-id>-<company>/agent_research_prompt.md`
 - `out/excluded_non_dispensary.csv`
 - `out/merge_suggestions_<YYYYMMDD-HHMMSS>.csv`
 - `out/research_queue.csv`
