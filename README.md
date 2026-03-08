@@ -1,195 +1,127 @@
-# CannaRadar v1.5
+# CannaRadar
 
-CannaRadar is a local-first, evidence-backed lead intelligence pipeline for cannabis outbound.
+> Private, local-first crawler and lead-intelligence system for cannabis outbound.
 
-The system discovers dispensary leads from public sources, crawls and extracts business contact signals, deduplicates entities, scores leads, and emits stable outreach-ready CSVs for execution.
+CannaRadar turns seed domains into scored, evidence-backed, outreach-ready leads. It crawls public sites, extracts contact and buyer signals, resolves them into a canonical SQLite model, generates research briefs, and emits deterministic exports that an operator or agent can actually use.
 
-## What v1.5 delivers today
+## At a Glance
 
-- Dispensary-first discovery with segment-aware exports.
-- Public-web only crawling with configurable polite behavior.
-- Deterministic entity resolution and merge suggestions.
-- Explainable lead scoring with persisted feature vectors.
-- Operational artifacts for quality monitoring and change diffing.
-- Migration-validated SQLite schema lifecycle.
+| Area | Current shape |
+| --- | --- |
+| Runtime model | Python 3.11 CLI |
+| Orchestration | `cannaradar_cli.py` -> `cli/app.py` -> `cli/sync.py` |
+| Core engine | `pipeline/pipeline.py:PipelineRunner` |
+| Crawl layer | Crawlee HTTP-first + isolated Playwright browser worker |
+| Persistence | SQLite + JSON run/checkpoint state |
+| Outputs | CSV exports + quality/change artifacts |
+| Operating mode | agent-operable, resumable, batch-first |
 
-## Core architecture
+## Why This Exists
+
+The point of this repo is not “generic crawling.” The point is to create a reliable internal machine for:
+
+- finding cannabis retail opportunities
+- extracting public proof and contact signals
+- ranking which locations matter first
+- producing stable handoff artifacts for outbound work
+- letting an agent operate the system without constant human babysitting
+
+This is a private operating system for lead generation, not a public-facing product surface.
+
+## One-Screen Mental Model
+
+1. Seeds enter from `seeds.csv`, `discoveries.csv`, and optional inbound discovery drops.
+2. The CLI starts a checkpointed run and builds a seed plan.
+3. Fetch crawls each seed domain, records `crawl_jobs` / `crawl_results`, and self-heals around junk paths, blocks, and browser failures.
+4. Enrich parses raw pages, resolves canonical locations, writes evidence, contacts, and domains.
+5. Score ranks locations.
+6. Research builds deterministic lead briefs and gap summaries.
+7. Export emits outreach, research, signal, and quality artifacts.
+8. Status, search, sql, and control expose live and historical state for operators and agents.
+
+## System Shape
 
 ```mermaid
 flowchart TD
-    Seeds[Seed file: seeds.csv] --> Discovery
-    Discovery --> Fetch
-    Fetch --> Parse
-    Parse --> Resolve
-    Resolve --> Enrich
-    Enrich --> Score
-    Score --> Research[Lead Research]
-    Research --> Export
-    Export --> Reports[Quality + Change reports]
-    Export --> Outreach[Outreach workflows]
-    Outreach --> Feedback[jobs/log_outreach_event.py]
-    Feedback --> Score
+    Seeds["seeds.csv / discoveries.csv / inbound discoveries"] --> CLI["cannaradar_cli.py"]
+    CLI --> App["cli/app.py"]
+    App --> Sync["cli/sync.py"]
+    Sync --> RunState["run_<id>.json"]
+    Sync --> RunControl["control_<id>.json"]
+    Sync --> Runner["pipeline/pipeline.py: PipelineRunner"]
+
+    Runner --> Discovery["discovery"]
+    Runner --> Fetch["fetch"]
+    Runner --> Enrich["enrich (parse + resolve + enrich)"]
+    Runner --> Score["score"]
+    Runner --> Research["research"]
+    Runner --> Export["export"]
+
+    Fetch --> Crawlee["pipeline/fetch_backends/crawlee_backend.py"]
+    Crawlee --> BrowserWorker["browser_worker.py"]
+    Discovery --> DB[(SQLite)]
+    Fetch --> DB
+    Enrich --> DB
+    Score --> DB
+    Research --> DB
+    Export --> Out["out/*.csv + out/*.json"]
+
+    Query["status / search / sql / control"] --> DB
+    Query --> RunState
+    Query --> RunControl
 ```
 
-## Repository map
+## The Important Brains
 
-- `pipeline/`: stage modules and orchestration.
-  - `pipeline/config.py`: runtime config load and env overrides.
-  - `pipeline/db.py`: SQLite connection helpers.
-  - `pipeline/fetch_backends/`: Crawlee fetch backend, shared persistence helpers, and domain policy loading.
-  - `pipeline/observability.py`: JSON logs and metrics counters.
-  - `pipeline/pipeline.py`: orchestrator entrypoint methods.
-  - `pipeline/run_state.py`: resumable agent-run checkpoints and stage markers.
-  - `pipeline/quality.py`: quality report generation.
-  - `pipeline/stages/discovery.py`: seed parsing and dedupe.
-- `pipeline/stages/fetch.py`: public fetch entrypoint backed by Crawlee HTTP crawl + Playwright escalation.
-- `pipeline/fetch_backends/browser_worker.py`: isolated Playwright worker used for browser escalation in autonomous-safe mode.
-  - `pipeline/stages/parse.py`: page extraction logic.
-  - `pipeline/stages/resolve.py`: entity dedupe and merge suggestions.
-- `pipeline/stages/enrich.py`: enrichment steps.
-- `pipeline/stages/score.py`: feature scoring.
-- `pipeline/stages/research.py`: agent research briefs and lead enhancement summaries.
-- `pipeline/stages/export.py`: deterministic CSV/report outputs.
-- `cli/`: canonical agent-ops command implementations, output envelopes, diagnostics, and resume logic.
-- `jobs/`
-  - `jobs/ingest_sources.py`: schema/migration bootstrap + hard checks.
-  - `jobs/export_changes.py`: snapshot diffing and change tracking.
-  - `jobs/log_outreach_event.py`: outcome logging.
-- `db/schema.sql`: canonical schema and constraints.
-- `cannaradar_cli.py`: command interface.
-- `run_v4.sh`: safe scheduled runner.
-- `docs/RUNBOOK_V1.md`: operator runbook.
-- `README_AI_AGENTS.md`: AI-agent operating reference.
-- `SKILL.md`: repo-local CannaRadar AI-agent skill/playbook.
+- **Run orchestration**: `cli/sync.py` and `pipeline/pipeline.py`
+  These decide what runs, in what order, and how resume/failure flows behave.
+- **Crawl behavior**: `pipeline/fetch_backends/crawlee_backend.py`
+  This is where the system decides what to fetch, what to skip, when to escalate to browser mode, and how to survive bad domains.
+- **Extraction and canonicalization**: `pipeline/stages/parse.py` and `pipeline/stages/resolve.py`
+  These turn raw HTML into structured business facts.
+- **Lead judgment**: `pipeline/stages/score.py`
+  This is the ranking brain.
+- **Follow-up guidance**: `pipeline/stages/research.py`
+  This builds the agent-ready lead brief and gap summary.
+- **Agent-operability**: `pipeline/run_state.py`, `pipeline/run_control.py`, `cli/query.py`, `cli/control.py`
+  These are what make the system resumable, inspectable, and steerable.
 
-## Command surface
+## How It Runs
 
-### Canonical agent-ops commands
-
-- `python3.11 cannaradar_cli.py init --json`
-- `python3.11 cannaradar_cli.py doctor --json`
-- `python3.11 cannaradar_cli.py sync --json --seeds seeds.csv --max 200`
-- `python3.11 cannaradar_cli.py tail --json --crawl-mode monitor --interval-seconds 300`
-- `python3.11 cannaradar_cli.py status --json`
-- `python3.11 cannaradar_cli.py control --json --run-id latest show`
-- `python3.11 cannaradar_cli.py search --json --preset failed-domains`
-- `python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"`
-- `python3.11 cannaradar_cli.py export --json --kind all`
-- `python3.11 cannaradar_cli.py export --json --kind agent-research`
-- `./run_v4.sh`
-
-### Legacy compatibility aliases
-
-- `python3.11 cannaradar_cli.py crawl:run --seeds seeds.csv --max 200`
-- `python3.11 cannaradar_cli.py enrich:run --since "<ISO_TIMESTAMP>"`
-- `python3.11 cannaradar_cli.py score:run`
-- `python3.11 cannaradar_cli.py export:outreach --tier A --limit 200`
-- `python3.11 cannaradar_cli.py export:research --limit 200`
-- `python3.11 cannaradar_cli.py quality:report`
-
-### Maintenance
-
-- `PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py`
-- `python3.11 jobs/export_changes.py --run-id <YYYYMMDD-HHMMSS>`
-- `python3.11 jobs/log_outreach_event.py --website <domain> --channel email --outcome replied --notes "<text>"`
-- `./run_smoke_tests.sh`
-
-## Agent-operable workflow
-
-Canonical automation loop:
-
-1. `python3.11 cannaradar_cli.py init --json`
-2. `python3.11 cannaradar_cli.py doctor --json`
-3. `python3.11 cannaradar_cli.py sync --json --crawl-mode growth --max 50`
-4. `python3.11 cannaradar_cli.py status --json`
-5. `python3.11 cannaradar_cli.py export --json --kind all`
-
-`sync` now includes a post-score `research` stage that builds agent-ready lead briefs, persists gap summaries in `evidence`, and emits `out/agent_research_queue.csv`.
-
-Resume loop after interruption:
-
-1. `python3.11 cannaradar_cli.py status --json`
-2. `python3.11 cannaradar_cli.py sync --json --resume latest`
-
-The canonical commands emit a stable `cli.v1` JSON envelope when `--json` is used. Schema docs live under `docs/schemas/cli/v1/`, and the operator flow is documented in `docs/AGENT_OPS_PLAYBOOK.md`.
-
-## Output matrix
-
-- `out/outreach_ready_<YYYYMMDD-HHMMSS>.csv`
-- `out/outreach_dispensary_100.csv`
-- `out/excluded_non_dispensary.csv`
-- `out/merge_suggestions_<YYYYMMDD-HHMMSS>.csv`
-- `out/research_queue.csv`
-- `out/agent_research_queue.csv`
-- `out/v4_quality_report.txt`
-- `out/quality_report.json`
-- `out/changes_<YYYYMMDD-HHMMSS>.csv`
-- `out/changes_<YYYYMMDD-HHMMSS>.txt`
-- `data/state/last_run_manifest.json`
-- `data/state/last_change_metrics.json`
-
-## Output schemas
-
-### Outreach-ready row
-
-`company_name, location, website, menu_provider, contact_name, contact_title, email, phone, score, tier, proof_urls`
-
-### Legacy compatibility row
-
-`dispensary, segment, website, state, market, owner_name, owner_role, email, phone, source_url, score, checked_at, segment_confidence, segment_reason`
-
-### Research queue row
-
-`company_name, website, contact_name, contact_title, email, phone, state, recommended_action, score`
-
-### Agent research queue row
-
-`company_name, website, state, score, tier, research_status, contact_name, contact_title, email, phone, menu_provider, proof_urls, social_urls, gaps, target_roles, suggested_paths, recommended_action, enhancement_summary`
-
-## Stage behavior and invariants
-
-- Discovery: seeds are canonicalized and deduped by website+state.
-- Fetch: Crawlee HTTP-first crawling with robots-aware request handling, explicit block detection, and browser escalation on blocked domains.
-- On macOS, browser escalation defaults to an isolated subprocess worker so Playwright crashes do not take down the main agent run.
-- Parse: extract emails, phones, staff-role pairs, and menu-provider signals.
-- Resolve: deterministic matching and merge suggestions; no destructive merges.
-- Enrich: first-party signals first; email inference is explicit low-confidence only.
-- Score: persisted feature vector per location and auditable tiers.
-- Research: agent-ready lead brief with gap analysis, target roles, suggested public paths, and recommended next action.
-- Export: segment filter and rank logic are deterministic and reproducible.
-
-## Quality and explainability
-
-Quality report emits:
-
-- `% leads with email`
-- `% leads with buyer-ish title`
-- duplicate domain rate
-- freshness distribution
-- top menu providers
-
-Each score is stored as:
-
-- `lead_scores(score_total, tier, run_id)`
-- `scoring_features(feature_name, feature_value)`
-
-You can inspect these tables directly for explanation or export review.
-
-## Migration and schema health
-
-`jobs/ingest_sources.py` enforces:
-
-- exact `PRAGMA user_version`
-- required tables and required columns
-- required indexes
-- `schema_migrations` checksum + current-version presence
-
-If checks fail, runbook-prescribed rollback guidance in `docs/RUNBOOK_V1.md` applies.
-
-## Local run example
+### Canonical workflow
 
 ```bash
-cd /Users/horcrux/Development/CannaRadar
+python3.11 cannaradar_cli.py init --json
+python3.11 cannaradar_cli.py doctor --json
+python3.11 cannaradar_cli.py sync --json --crawl-mode growth --max 50
+python3.11 cannaradar_cli.py status --json
+python3.11 cannaradar_cli.py export --json --kind all
+```
+
+### Resume workflow
+
+```bash
+python3.11 cannaradar_cli.py status --json
+python3.11 cannaradar_cli.py sync --json --resume latest
+```
+
+### Continuous monitor loop
+
+```bash
+python3.11 cannaradar_cli.py tail --json --crawl-mode monitor --interval-seconds 300
+```
+
+### Scheduled wrapper
+
+```bash
+./run_v4.sh
+```
+
+`run_v4.sh` is the safe shell wrapper. It adds locking, optional canonical ingest, export-change diffing, and manifest post-processing around the canonical CLI.
+
+## Fast Start
+
+```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -198,38 +130,95 @@ playwright install chromium
 PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py
 python3.11 cannaradar_cli.py init --json
 python3.11 cannaradar_cli.py doctor --json
-python3.11 cannaradar_cli.py sync --json --seeds seeds.csv
+python3.11 cannaradar_cli.py sync --json --seeds seeds.csv --max 25 --crawl-mode growth
 python3.11 cannaradar_cli.py status --json
 ```
 
-## AI-agent operating instructions
+## Command Surface
 
-Use this order for safe modifications:
+### Primary commands
 
-- Inspect `pipeline/stages/` for stage-specific behavior changes first.
-- Keep edits stage-local and additive by default.
-- Update tests and docs for any behavior change.
-- If changing persistence, adjust `db/schema.sql`, then `jobs/ingest_sources.py`, then run schema tests.
-- If changing scores, update `pipeline/stages/score.py` and expected ranges/features.
+| Command | Purpose |
+| --- | --- |
+| `init` | bootstrap config, DB, state directories, and policy files |
+| `doctor` | preflight checks for runtime, schema, config, paths, and browser availability |
+| `sync` | run the full checkpointed pipeline |
+| `tail` | repeat `sync` on an interval for monitor workflows |
+| `status` | summarize manifest, DB state, checkpoint state, outputs, and recent failures |
+| `control` | inspect or apply bounded live interventions |
+| `search` | query curated diagnostics and local lead state |
+| `sql` | read-only SQL surface over local SQLite |
+| `export` | generate outreach, research, signal, and quality outputs |
 
-Use strict confidence tracking for every new extraction path and always provide evidence URLs in `evidence` rows.
+### Useful control examples
 
-### AI skill pointer
+```bash
+python3.11 cannaradar_cli.py control --json --run-id latest show
+python3.11 cannaradar_cli.py control --json --run-id latest quarantine-seed --domain bad.example --reason dns_failure
+python3.11 cannaradar_cli.py control --json --run-id latest suppress-prefix --domain example.com --prefix /blog/ --reason low_value_path
+python3.11 cannaradar_cli.py control --json --run-id latest cap-domain --domain example.com --max-pages 2 --reason noisy_domain
+```
 
-- Skill path: `SKILL.md` (in this repo)
-- Use this when you need structured, stage-safe changes or AI handoffs.
+## What Comes Out
 
-## Troubleshooting
+Primary runtime outputs:
 
-- Schema failures: run `PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py` and follow rollback steps.
-- Empty exports: confirm crawl seeds and denylist, then review `out/v4_quality_report.txt`.
-- Missing segment purity: inspect `segment` in `out/outreach_ready_<run_id>.csv` and `out/excluded_non_dispensary.csv`.
-- Run artifact gaps: ensure `data/state/` exists and pipeline write permissions are available.
+- `out/outreach_ready_<run_id>.csv`
+- `out/outreach_dispensary_100.csv`
+- `out/research_queue.csv`
+- `out/agent_research_queue.csv`
+- `out/new_leads_only.csv`
+- `out/callable_leads.csv`
+- `out/quality_report.json`
+- `data/state/last_run_manifest.json`
+- `data/state/agent_runs/run_<id>.json`
+- `data/state/agent_runs/control_<id>.json`
 
-## What is considered unnecessary to keep in the repo
+The key promise is determinism: the pipeline writes stable files and stable machine-readable CLI envelopes so an operator or agent can reason about what happened without scraping console text.
 
-- Old v4-only notes.
-- Duplicate runbooks describing the same commands with different semantics.
-- Experimental notes that are not in active operator flow.
+## Operational Invariants
 
-If a doc does not describe a run path that can execute in `v1.5`, move it to historical archive or remove it from the onboarding path.
+- Discovery is deduped by normalized `website + state`.
+- Fetch is public-web only, HTTP-first, and same-domain constrained by design.
+- Browser escalation is isolated so Playwright failures do not take down the main batch.
+- Resolution is deterministic; this repo does not auto-merge entities recklessly.
+- Scoring is explainable through `lead_scores` and `scoring_features`.
+- Research is deterministic synthesis over stored evidence, not a hidden LLM workflow.
+- Exports are contract-shaped and intended to remain stable.
+
+## Repo Landmarks
+
+| Area | What it owns |
+| --- | --- |
+| `cli/` | command contract, output envelopes, diagnostics, status/search/sql/control |
+| `pipeline/` | orchestration, fetch, parsing, resolution, scoring, research, exports |
+| `pipeline/fetch_backends/` | Crawlee runtime, browser worker, fetch persistence, policy loading |
+| `db/schema.sql` | canonical storage model |
+| `jobs/` | schema bootstrap, change diffing, outreach logging |
+| `docs/` | deep internal architecture and operator docs |
+| `run_v4.sh` | scheduled-run wrapper |
+
+## Read Next
+
+- [Internal docs index](./docs/README.md)
+- [Purpose and overview](./docs/01-purpose-and-overview.md)
+- [Architecture](./docs/02-architecture.md)
+- [Runtime flow](./docs/04-runtime-flow.md)
+- [State and lifecycle](./docs/10-state-and-lifecycle.md)
+- [Failure modes and recovery](./docs/11-failure-modes-and-recovery.md)
+- [How to modify the system](./docs/12-how-to-modify-the-system.md)
+- [Agent ops playbook](./docs/AGENT_OPS_PLAYBOOK.md)
+- [Runbook](./docs/RUNBOOK_V1.md)
+
+## Private Repo Notes
+
+This repo is intentionally not positioned as a generic open-source crawler.
+
+What is valuable here is the combination of:
+
+- cannabis-specific signal extraction
+- lead prioritization rules
+- agent-operable run control
+- deterministic exports for outbound workflows
+
+Treat the README as an internal landing page, and use `docs/` for the full system mental model.
