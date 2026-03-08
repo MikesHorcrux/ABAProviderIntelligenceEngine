@@ -57,6 +57,7 @@ def _add_sync_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--crawlee-headless", type=str, default=None, choices=["on", "off"])
     parser.add_argument("--crawlee-proxy-urls", default=None)
     parser.add_argument("--crawlee-max-browser-pages", type=int, default=None)
+    parser.add_argument("--crawlee-browser-isolation", default=None, choices=["inline", "subprocess"])
     parser.add_argument("--crawlee-domain-policies-file", default=None)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--resume", default=None, help="Resume a checkpointed run by run_id or `latest`.")

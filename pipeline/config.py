@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -91,6 +92,7 @@ class CrawlConfig:
     crawlee_viewport_width: int = 1280
     crawlee_viewport_height: int = 1024
     crawlee_max_browser_pages_per_domain: int = 5
+    crawlee_browser_isolation: str = "subprocess" if sys.platform == "darwin" else "inline"
     crawlee_extra_block_patterns: list[str] = field(default_factory=list)
     crawlee_domain_policies_file: str = "fetch_policies.json"
     config_path: str = str(DEFAULT_CONFIG_PATH)
@@ -168,6 +170,7 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
     crawlee_headless = os.environ.get("CANNARADAR_CRAWLEE_HEADLESS")
     crawlee_proxy_urls = os.environ.get("CANNARADAR_CRAWLEE_PROXY_URLS")
     crawlee_max_browser_pages = os.environ.get("CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN")
+    crawlee_browser_isolation = os.environ.get("CANNARADAR_CRAWLEE_BROWSER_ISOLATION")
     crawlee_domain_policies_file = os.environ.get("CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE")
 
     if not cfg_path.exists():
@@ -289,6 +292,13 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
                 or data.get("crawleeMaxBrowserPagesPerDomain", defaults.crawlee_max_browser_pages_per_domain)
             ),
         ),
+        crawlee_browser_isolation=str(
+            (
+                crawlee_browser_isolation
+                or data.get("crawleeBrowserIsolation", defaults.crawlee_browser_isolation)
+            )
+        ).strip().lower()
+        or defaults.crawlee_browser_isolation,
         crawlee_extra_block_patterns=_coalesce_list(
             data.get("crawleeExtraBlockPatterns"),
             defaults.crawlee_extra_block_patterns,

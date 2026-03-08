@@ -54,6 +54,7 @@
   "crawleeViewportWidth": 1280,
   "crawleeViewportHeight": 1024,
   "crawleeMaxBrowserPagesPerDomain": 5,
+  "crawleeBrowserIsolation": "subprocess",
   "crawleeExtraBlockPatterns": [],
   "crawleeDomainPoliciesFile": "fetch_policies.json"
 }

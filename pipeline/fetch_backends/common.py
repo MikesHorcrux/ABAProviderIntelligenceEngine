@@ -205,11 +205,11 @@ def _upsert_seed_telemetry(
             run_success_pages,
             run_failure_pages,
             1 if run_success_pages > 0 else 0,
-            1 if run_status in {"partial", "empty", "failed"} else 0,
+            1 if run_status in {"partial", "empty", "failed", "stopped", "quarantined"} else 0,
             0,
             last_status_code,
             run_completed_at if run_success_pages > 0 else "",
-            run_completed_at if run_status in {"partial", "empty", "failed"} else "",
+            run_completed_at if run_status in {"partial", "empty", "failed", "stopped", "quarantined"} else "",
             run_started_at,
             run_completed_at,
             run_status,
@@ -268,6 +268,7 @@ class SeedRunRecorder:
                 self.started_at,
             ),
         )
+        self.con.commit()
 
     def record_result(
         self,
@@ -326,6 +327,7 @@ class SeedRunRecorder:
                 "UPDATE crawl_jobs SET last_status_code=?, updated_at=?, status='partial' WHERE crawl_job_pk=?",
                 (status_code, fetched_at, self.job_pk),
             )
+        self.con.commit()
 
         if not emit_result:
             return None
@@ -354,13 +356,13 @@ class SeedRunRecorder:
         if self.last_status_code <= 0:
             self.last_status_code = code
 
-    def finalize(self) -> None:
+    def finalize(self, *, final_status: str | None = None) -> None:
         completed_at = utcnow_iso()
         last_status_code = self.last_status_code or self._status_hint
-        final_status = "completed" if self.has_success else ("partial" if self.run_pages_fetched else "empty")
+        resolved_status = final_status or ("completed" if self.has_success else ("partial" if self.run_pages_fetched else "empty"))
         self.con.execute(
             "UPDATE crawl_jobs SET status=?, last_status_code=?, completed_at=?, updated_at=? WHERE crawl_job_pk=?",
-            (final_status, last_status_code, completed_at, completed_at, self.job_pk),
+            (resolved_status, last_status_code, completed_at, completed_at, self.job_pk),
         )
         _upsert_seed_telemetry(
             self.con,
@@ -369,10 +371,11 @@ class SeedRunRecorder:
             run_job_pk=self.job_pk,
             run_started_at=self.started_at,
             run_completed_at=completed_at,
-            run_status=final_status,
+            run_status=resolved_status,
             last_status_code=last_status_code,
             run_attempts=self.run_attempts,
             run_success_pages=self.run_success_pages,
             run_failure_pages=self.run_failure_pages,
             run_pages_fetched=self.run_pages_fetched,
         )
+        self.con.commit()

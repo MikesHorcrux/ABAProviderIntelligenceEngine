@@ -317,6 +317,7 @@ def default_config_payload() -> dict[str, Any]:
         "crawleeViewportWidth": cfg.crawlee_viewport_width,
         "crawleeViewportHeight": cfg.crawlee_viewport_height,
         "crawleeMaxBrowserPagesPerDomain": cfg.crawlee_max_browser_pages_per_domain,
+        "crawleeBrowserIsolation": cfg.crawlee_browser_isolation,
         "crawleeExtraBlockPatterns": cfg.crawlee_extra_block_patterns,
         "crawleeDomainPoliciesFile": cfg.crawlee_domain_policies_file,
     }

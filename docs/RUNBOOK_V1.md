@@ -24,6 +24,7 @@ This runbook is the operator source of truth for running, validating, and recove
 - `CANNARADAR_CRAWLEE_PROXY_URLS`: comma-separated proxy URLs for Crawlee.
 - `CANNARADAR_CRAWLEE_HEADLESS`: `on|off` browser headless toggle.
 - `CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN`: per-domain Playwright cap.
+- `CANNARADAR_CRAWLEE_BROWSER_ISOLATION`: `inline|subprocess` browser execution mode.
 - `CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE`: alternate domain policy file path.
 
 ## Agent-ops workflow
@@ -153,6 +154,7 @@ Outputs:
 - Verify `CANNARADAR_DENYLIST` does not include required domains.
 - Confirm robots access by checking fetch logs for blocked URLs.
 - Confirm `fetch_policies.json` contains exact normalized domains only for any browser-only overrides.
+- On macOS, leave `CANNARADAR_CRAWLEE_BROWSER_ISOLATION=subprocess` unless you are debugging the inline browser path.
 
 ## Post-run checks
 

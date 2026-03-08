@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from pipeline.config import load_crawl_config
+import pipeline.fetch_backends.crawlee_backend as crawlee_backend
 from pipeline.fetch_backends.crawlee_backend import SeedCrawlState
 from pipeline.fetch_backends.common import (
     SeedRunRecorder,
@@ -16,6 +17,7 @@ from pipeline.fetch_backends.common import (
 )
 from pipeline.fetch_backends.domain_policy import load_domain_policies
 from pipeline.observability import Metrics, build_logger
+from pipeline.run_control import load_run_control
 from pipeline.stages.discovery import DiscoverySeed
 
 
@@ -225,6 +227,46 @@ def test_seed_run_recorder_uses_status_hint_for_empty_blocked_seed() -> None:
     con.close()
 
 
+def test_seed_run_recorder_commits_progress_immediately() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db_path = Path(td) / "fetch-progress.db"
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        metrics = Metrics("fetch-progress")
+        seed = DiscoverySeed(name="Progress Seed", website="https://progress.example", state="CA", market="CA")
+        recorder = SeedRunRecorder(
+            con=con,
+            seed=seed,
+            seed_domain="progress.example",
+            job_id="job-progress",
+            metrics=metrics,
+        )
+        recorder.start()
+        recorder.record_result(
+            requested_url="https://progress.example/",
+            normalized_url="https://progress.example/",
+            status_code=200,
+            content="<html>ok</html>",
+            error_message="",
+            attempt_count=1,
+            emit_result=True,
+            count_as_success=True,
+        )
+
+        observer = sqlite3.connect(db_path)
+        observer.row_factory = sqlite3.Row
+        crawl_job = observer.execute("SELECT status FROM crawl_jobs WHERE seed_domain='progress.example'").fetchone()
+        crawl_results = observer.execute("SELECT COUNT(*) FROM crawl_results WHERE crawl_job_pk=?", (recorder.job_pk,)).fetchone()[0]
+
+        assert crawl_job is not None
+        assert crawl_job["status"] == "running"
+        assert int(crawl_results) == 1
+
+        observer.close()
+        con.close()
+
+
 def test_seed_crawl_state_filters_assets_and_honors_manual_controls() -> None:
     con = _connect()
     metrics = Metrics("fetch-controls")
@@ -328,6 +370,87 @@ def test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns() -> None:
     con.close()
 
 
+def test_run_fetch_contains_browser_driver_failure_to_one_seed() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db_path = Path(td) / "fetch.db"
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        metrics = Metrics("fetch-runtime-failure")
+        logger = build_logger("fetch-runtime-failure", "fetch")
+        cfg = load_crawl_config("/tmp/cannaradar-fetch-runtime-failure.json")
+        cfg.crawlee_browser_isolation = "subprocess"
+        seeds = [
+            DiscoverySeed(name="Crash Seed", website="https://fail.example", state="CA", market="CA"),
+            DiscoverySeed(name="Healthy Seed", website="https://pass.example", state="CA", market="CA"),
+        ]
+
+        original_http = crawlee_backend._run_http_crawl
+        original_browser_worker = crawlee_backend._run_browser_worker_subprocess
+
+        async def fake_run_http_crawl(state, initial_requests):
+            target_url = initial_requests[0].normalized_url
+            state.mark_processed(target_url)
+            state.recorder.record_result(
+                requested_url=target_url,
+                normalized_url=target_url,
+                status_code=200,
+                content="<html>ok</html>",
+                error_message="",
+                attempt_count=1,
+                emit_result=True,
+                count_as_success=True,
+            )
+            state.observe_success()
+            if state.domain == "fail.example":
+                state.request_browser_escalation("marker:captcha")
+
+        def fake_browser_worker_subprocess(state, initial_requests):
+            raise RuntimeError("Connection closed while reading from the driver")
+
+        crawlee_backend._run_http_crawl = fake_run_http_crawl
+        crawlee_backend._run_browser_worker_subprocess = fake_browser_worker_subprocess
+        try:
+            results = crawlee_backend.run_fetch(
+                con,
+                seeds,
+                cfg,
+                logger,
+                metrics,
+                "job-seed-runtime-failure",
+                max_pages_per_domain=2,
+                max_total_pages=2,
+                max_depth=0,
+                run_state_dir=td,
+            )
+        finally:
+            crawlee_backend._run_http_crawl = original_http
+            crawlee_backend._run_browser_worker_subprocess = original_browser_worker
+
+        statuses = {
+            row["seed_domain"]: row["status"]
+            for row in con.execute("SELECT seed_domain, status FROM crawl_jobs ORDER BY seed_domain").fetchall()
+        }
+        telemetry = {
+            row["seed_domain"]: row["last_run_status"]
+            for row in con.execute("SELECT seed_domain, last_run_status FROM seed_telemetry ORDER BY seed_domain").fetchall()
+        }
+        control = load_run_control("job-seed-runtime-failure", td)
+        crash_control = control["agent_controls"]["domains"]["fail.example"]
+        crash_runtime = control["runtime"]["domains"]["fail.example"]
+
+        assert len(results) == 2
+        assert sorted(result.seed_name for result in results) == ["Crash Seed", "Healthy Seed"]
+        assert statuses["fail.example"] == "partial"
+        assert statuses["pass.example"] == "completed"
+        assert telemetry["fail.example"] == "partial"
+        assert crash_control["stop_requested"] is True
+        assert crash_runtime["status"] == "partial"
+        assert metrics.snapshot()["seed_crawl_exceptions"] == 1
+
+        con.close()
+
+
 def main() -> None:
     test_domain_policy_loader_uses_exact_normalized_domains()
     test_block_signal_classification_covers_status_and_markers()
@@ -336,8 +459,10 @@ def main() -> None:
     test_status_code_from_error_text_parses_session_error_message()
     test_seed_run_recorder_persists_contract_rows_and_results()
     test_seed_run_recorder_uses_status_hint_for_empty_blocked_seed()
+    test_seed_run_recorder_commits_progress_immediately()
     test_seed_crawl_state_filters_assets_and_honors_manual_controls()
     test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns()
+    test_run_fetch_contains_browser_driver_failure_to_one_seed()
     print("test_fetch_dispatch: ok")
 
 

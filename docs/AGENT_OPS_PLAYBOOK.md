@@ -26,6 +26,7 @@ python3.11 cannaradar_cli.py sync --json --resume latest
 - `init`: create config, fetch policy, DB schema, output/state dirs.
 - `doctor`: preflight checks for config, runtime, writable paths, DB schema, Crawlee, Playwright.
 - `sync`: checkpointed batch crawl with resumable stage boundaries.
+- `sync` uses isolated browser escalation on macOS by default (`crawleeBrowserIsolation=subprocess`) so Playwright failures stay seed-local.
 - `tail`: repeated `sync` loop for monitoring workflows.
 - `status`: latest manifest, checkpoint, DB summary, recent failures.
 - `control`: bounded runtime interventions for active or resumable runs.

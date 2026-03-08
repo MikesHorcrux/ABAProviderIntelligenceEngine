@@ -42,7 +42,8 @@ flowchart TD
   - `pipeline/run_state.py`: resumable agent-run checkpoints and stage markers.
   - `pipeline/quality.py`: quality report generation.
   - `pipeline/stages/discovery.py`: seed parsing and dedupe.
-  - `pipeline/stages/fetch.py`: public fetch entrypoint backed by Crawlee HTTP crawl + Playwright escalation.
+- `pipeline/stages/fetch.py`: public fetch entrypoint backed by Crawlee HTTP crawl + Playwright escalation.
+- `pipeline/fetch_backends/browser_worker.py`: isolated Playwright worker used for browser escalation in autonomous-safe mode.
   - `pipeline/stages/parse.py`: page extraction logic.
   - `pipeline/stages/resolve.py`: entity dedupe and merge suggestions.
 - `pipeline/stages/enrich.py`: enrichment steps.
@@ -149,6 +150,7 @@ The canonical commands emit a stable `cli.v1` JSON envelope when `--json` is use
 
 - Discovery: seeds are canonicalized and deduped by website+state.
 - Fetch: Crawlee HTTP-first crawling with robots-aware request handling, explicit block detection, and browser escalation on blocked domains.
+- On macOS, browser escalation defaults to an isolated subprocess worker so Playwright crashes do not take down the main agent run.
 - Parse: extract emails, phones, staff-role pairs, and menu-provider signals.
 - Resolve: deterministic matching and merge suggestions; no destructive merges.
 - Enrich: first-party signals first; email inference is explicit low-confidence only.

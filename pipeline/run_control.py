@@ -186,6 +186,31 @@ def update_runtime_controls(
     return state
 
 
+def finalize_run_control(
+    run_id: str,
+    *,
+    status: str,
+    base_dir: str | Path | None = None,
+    replace_running_with: str | None = None,
+    message: str = "",
+) -> dict[str, Any]:
+    state = ensure_run_control(run_id, base_dir)
+    state["status"] = status
+    runtime = state.setdefault("runtime", {})
+    runtime["current_seed_domain"] = ""
+    domains = dict(runtime.get("domains") or {})
+    replacement = replace_running_with or status
+    for domain in domains:
+        record = domain_runtime_record(state, domain)
+        if record.get("status") == "running":
+            record["status"] = replacement
+            if message and not record.get("last_error"):
+                record["last_error"] = message[:240]
+            record["updated_at"] = _now()
+    save_run_control(state, base_dir)
+    return state
+
+
 def summarize_run_control(state: dict[str, Any]) -> dict[str, Any]:
     runtime = dict(state.get("runtime") or {})
     agent_controls = dict(state.get("agent_controls") or {})

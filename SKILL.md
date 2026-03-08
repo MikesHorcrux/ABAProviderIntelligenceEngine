@@ -58,6 +58,7 @@ python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status
 - Prefer bounded live runs first: `25`, then `50`, then `100`, then full seed inventory.
 - Treat `data/state/agent_runs/run_<run_id>.json` as the primary checkpoint for resumability and runtime diagnostics.
 - Use `status --json` instead of guessing whether a run is progressing.
+- On macOS, leave browser escalation in isolated subprocess mode unless the task is explicitly debugging inline Playwright behavior.
 - Use `out/agent_research_queue.csv` as the first artifact for agent follow-up once a run scores leads.
 - If a live run is interrupted, resume from the checkpoint before starting a new run unless the checkpoint is clearly corrupt.
 

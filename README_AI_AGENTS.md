@@ -47,6 +47,7 @@ Read these first:
 - Start uncertain environments with `init` and `doctor`.
 - Prefer bounded live runs before full inventory runs.
 - Use `status --json` and checkpoint files to diagnose progress instead of relying on terminal noise.
+- On macOS, prefer the default isolated browser worker (`crawleeBrowserIsolation=subprocess`) for unattended runs.
 - Use `out/agent_research_queue.csv` and `search --preset research-needed` to decide which leads still need agent follow-up.
 - Resume interrupted runs with `sync --resume latest` when the checkpoint is still valid.
 - Treat repeated asset/static/blog churn in fetch as URL-filter debt, not as proof the pipeline is healthy.

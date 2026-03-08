@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from cli.sync import execute_sync
+from pipeline.run_control import ensure_run_control, finalize_run_control, load_run_control, save_run_control
 from pipeline.run_state import (
     create_run_state,
     load_run_state,
@@ -231,9 +232,44 @@ def test_execute_sync_can_resume_from_checkpoint() -> None:
         assert resumed["stages"]["export"]["status"] == "completed"
 
 
+def test_finalize_run_control_clears_stale_running_domain() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        run_dir = Path(td)
+        state = ensure_run_control("run-control-test", run_dir)
+        state["runtime"]["current_seed_domain"] = "demo.example"
+        state["runtime"]["domains"]["demo.example"] = {
+            "status": "running",
+            "processed_urls": 3,
+            "success_pages": 1,
+            "failure_pages": 1,
+            "filtered_urls": 2,
+            "last_status_code": 403,
+            "last_error": "",
+            "discovery_enabled": False,
+            "browser_escalated": True,
+            "updated_at": "2026-03-08T00:00:00",
+        }
+        save_run_control(state, run_dir)
+
+        finalize_run_control(
+            "run-control-test",
+            status="failed",
+            base_dir=run_dir,
+            replace_running_with="failed",
+            message="browser driver crashed",
+        )
+        updated = load_run_control("run-control-test", run_dir)
+
+        assert updated["status"] == "failed"
+        assert updated["runtime"]["current_seed_domain"] == ""
+        assert updated["runtime"]["domains"]["demo.example"]["status"] == "failed"
+        assert updated["runtime"]["domains"]["demo.example"]["last_error"] == "browser driver crashed"
+
+
 def main() -> None:
     test_run_state_round_trip()
     test_execute_sync_can_resume_from_checkpoint()
+    test_finalize_run_control_clears_stale_running_domain()
     print("test_run_state: ok")
 
 

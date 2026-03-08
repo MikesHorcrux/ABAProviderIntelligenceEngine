@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import json
+import os
+import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -31,6 +35,7 @@ from pipeline.fetch_backends.common import (
 from pipeline.fetch_backends.domain_policy import DomainPolicy, load_domain_policies
 from pipeline.run_control import (
     append_intervention,
+    domain_control_record,
     domain_runtime_record,
     ensure_run_control,
     load_run_control,
@@ -55,6 +60,7 @@ AUTO_STOP_BLOCKED_FAILURES = 3
 AUTO_STOP_NOT_FOUND_FAILURES = 8
 CONTROL_REFRESH_INTERVAL_SECONDS = 0.75
 RUNTIME_PERSIST_INTERVAL_SECONDS = 1.0
+BLOCK_REASON_STATUS_HINT = 403
 
 STATIC_PATH_PREFIXES = (
     "/_next/",
@@ -152,6 +158,19 @@ def _failure_kind(status_code: int, error_message: str) -> str:
     return "error"
 
 
+def _status_code_from_block_reason(reason: str) -> int:
+    if not reason:
+        return 0
+    if reason.startswith("status:"):
+        try:
+            return int(reason.split(":", 1)[1])
+        except ValueError:
+            return 0
+    if reason.startswith("marker:"):
+        return BLOCK_REASON_STATUS_HINT
+    return 0
+
+
 @dataclass
 class SeedCrawlState:
     con: sqlite3.Connection
@@ -183,6 +202,7 @@ class SeedCrawlState:
     failure_counts: dict[str, int] = field(default_factory=dict)
     prefix_failure_counts: dict[str, int] = field(default_factory=dict)
     current_error: str = ""
+    seed_exception_reason: str = ""
     recorded_action_keys: set[str] = field(default_factory=set)
     control_last_refreshed_at: float = 0.0
     runtime_last_persisted_at: float = 0.0
@@ -319,6 +339,37 @@ class SeedCrawlState:
             self.browser_page_limit = self.base_browser_page_limit
         self.control_last_refreshed_at = now_monotonic
 
+    def _update_control_record(
+        self,
+        *,
+        quarantined: bool | None = None,
+        quarantine_reason: str | None = None,
+        stop_requested: bool | None = None,
+        add_suppressed_prefix: str | None = None,
+    ) -> dict[str, Any]:
+        state = self._control_state()
+        record = domain_control_record(state, self.domain)
+        if quarantined is not None:
+            record["quarantined"] = bool(quarantined)
+        if quarantine_reason is not None:
+            record["quarantine_reason"] = str(quarantine_reason)
+        elif quarantined is False:
+            record["quarantine_reason"] = ""
+        if stop_requested is not None:
+            record["stop_requested"] = bool(stop_requested)
+        if add_suppressed_prefix:
+            prefixes = {
+                str(item).strip().lower()
+                for item in record.get("suppressed_path_prefixes", [])
+                if str(item).strip()
+            }
+            prefixes.add(str(add_suppressed_prefix).strip().lower())
+            record["suppressed_path_prefixes"] = sorted(prefixes)
+        record["updated_at"] = utcnow_iso()
+        save_run_control(state, self.run_state_dir)
+        self.refresh_controls(force=True)
+        return record
+
     def mark_processed(self, normalized_url: str) -> None:
         self.processed_urls.add(normalized_url)
         self.persist_runtime()
@@ -369,17 +420,8 @@ class SeedCrawlState:
                 and prefix not in self.suppressed_path_prefixes
             ):
                 state = self._control_state()
-                domains = state.setdefault("agent_controls", {}).setdefault("domains", {})
-                record = dict(domains.get(self.domain) or {})
-                prefixes = {
-                    str(item).strip().lower()
-                    for item in record.get("suppressed_path_prefixes", [])
-                    if str(item).strip()
-                }
-                prefixes.add(prefix)
-                record["suppressed_path_prefixes"] = sorted(prefixes)
-                record["updated_at"] = utcnow_iso()
-                domains[self.domain] = record
+                self._update_control_record(add_suppressed_prefix=prefix)
+                state = self._control_state()
                 append_intervention(
                     state,
                     domain=self.domain,
@@ -389,7 +431,6 @@ class SeedCrawlState:
                     details={"prefix": prefix, "failures": self.prefix_failure_counts[prefix]},
                 )
                 save_run_control(state, self.run_state_dir)
-                self.manual_suppressed_path_prefixes = prefixes
                 self.recorded_action_keys.add(f"prefix:{prefix}")
                 self.logger.warning(
                     "fetch_intervention",
@@ -408,6 +449,11 @@ class SeedCrawlState:
             self.seed_quarantine_reason = "dns_failure"
             self.stop_requested = True
             self.discovery_enabled = False
+            self._update_control_record(
+                quarantined=True,
+                quarantine_reason=self.seed_quarantine_reason,
+                stop_requested=True,
+            )
             self._persist_intervention(
                 key="stop:dns",
                 action="auto_quarantine_seed",
@@ -421,6 +467,7 @@ class SeedCrawlState:
         if failure_kind == "blocked" and self.failure_counts[failure_kind] >= AUTO_STOP_BLOCKED_FAILURES:
             self.stop_requested = True
             self.discovery_enabled = False
+            self._update_control_record(stop_requested=True)
             self._persist_intervention(
                 key="stop:blocked",
                 action="auto_stop_domain",
@@ -434,6 +481,8 @@ class SeedCrawlState:
         if failure_kind == "not_found" and self.failure_counts[failure_kind] >= AUTO_STOP_NOT_FOUND_FAILURES:
             self.discovery_enabled = False
             self.stop_requested = self.recorder.run_success_pages == 0
+            if self.stop_requested:
+                self._update_control_record(stop_requested=True)
             self._persist_intervention(
                 key="stop:not_found",
                 action="auto_disable_discovery",
@@ -651,6 +700,237 @@ async def _read_http_body(http_response: Any, *, content_type: str | None) -> st
 
 def _usable_content(status_code: int, html: str, block_signal: BlockSignal) -> bool:
     return status_code == 200 and bool(html) and not block_signal.triggered
+
+
+def _resolved_browser_isolation(cfg: CrawlConfig) -> str:
+    mode = str(getattr(cfg, "crawlee_browser_isolation", "") or "").strip().lower()
+    if mode in {"inline", "subprocess"}:
+        return mode
+    return "subprocess" if sys.platform == "darwin" else "inline"
+
+
+def _browser_worker_payload(state: SeedCrawlState, initial_requests: list[QueueItem]) -> dict[str, Any]:
+    return {
+        "seed": {
+            "name": state.seed.name,
+            "website": state.seed.website,
+            "state": state.seed.state,
+            "market": state.seed.market,
+            "source": state.seed.source,
+            "priority": state.seed.priority,
+        },
+        "config": {
+            "user_agent": state.cfg.user_agent,
+            "timeout_seconds": state.cfg.timeout_seconds,
+            "max_retries": state.cfg.max_retries,
+            "crawl_delay_seconds": state.cfg.crawl_delay_seconds,
+            "respect_robots": state.cfg.respect_robots,
+            "max_concurrency": state.cfg.max_concurrency,
+            "crawlee_headless": state.cfg.crawlee_headless,
+            "crawlee_browser_type": state.cfg.crawlee_browser_type,
+            "crawlee_proxy_urls": list(state.cfg.crawlee_proxy_urls),
+            "crawlee_use_session_pool": state.cfg.crawlee_use_session_pool,
+            "crawlee_retry_on_blocked": state.cfg.crawlee_retry_on_blocked,
+            "crawlee_max_session_rotations": state.cfg.crawlee_max_session_rotations,
+            "crawlee_viewport_width": state.cfg.crawlee_viewport_width,
+            "crawlee_viewport_height": state.cfg.crawlee_viewport_height,
+            "allowed_schemes": list(state.allowed_schemes),
+        },
+        "policy": {
+            "wait_for_selector": state.policy.wait_for_selector,
+        },
+        "limits": {
+            "crawl_depth": state.crawl_depth,
+            "browser_budget": state.remaining_browser_budget,
+        },
+        "block_patterns": list(state.block_patterns),
+        "denylist": sorted(state.denylist),
+        "seen_urls": sorted(state.seen_urls),
+        "processed_urls": sorted(state.processed_urls),
+        "suppressed_path_prefixes": sorted(state.suppressed_path_prefixes),
+        "initial_requests": [
+            {
+                "requested_url": item.requested_url,
+                "normalized_url": item.normalized_url,
+                "depth": item.depth,
+            }
+            for item in initial_requests[: state.remaining_browser_budget]
+        ],
+    }
+
+
+def _spawn_browser_worker(payload_path: Path, result_path: Path) -> tuple[int, str]:
+    argv = [
+        sys.executable,
+        "-m",
+        "pipeline.fetch_backends.browser_worker",
+        str(payload_path),
+        str(result_path),
+    ]
+    env = os.environ.copy()
+    repo_root = str(Path(__file__).resolve().parents[2])
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = repo_root if not existing_pythonpath else f"{repo_root}{os.pathsep}{existing_pythonpath}"
+
+    if hasattr(os, "posix_spawn"):
+        pid = os.posix_spawn(sys.executable, argv, env)
+        _, status = os.waitpid(pid, 0)
+        return os.waitstatus_to_exitcode(status), "posix_spawn"
+
+    import subprocess
+
+    completed = subprocess.run(argv, env=env, check=False)
+    return int(completed.returncode), "subprocess"
+
+
+def _run_browser_worker_subprocess(state: SeedCrawlState, initial_requests: list[QueueItem]) -> dict[str, Any]:
+    payload = _browser_worker_payload(state, initial_requests)
+    with tempfile.TemporaryDirectory(prefix="cannaradar-browser-worker-") as td:
+        payload_path = Path(td) / "payload.json"
+        result_path = Path(td) / "result.json"
+        payload_path.write_text(json.dumps(payload), encoding="utf-8")
+        exit_code, launch_mode = _spawn_browser_worker(payload_path, result_path)
+        if not result_path.exists():
+            raise RuntimeError(f"browser worker failed before writing results (exit_code={exit_code}, launch_mode={launch_mode})")
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        if not isinstance(result, dict):
+            raise RuntimeError(f"browser worker returned malformed payload (exit_code={exit_code}, launch_mode={launch_mode})")
+        result.setdefault("launch_mode", launch_mode)
+        result.setdefault("exit_code", exit_code)
+        if exit_code != 0 and not result.get("ok", False):
+            raise RuntimeError(
+                str(result.get("error") or f"browser worker exited with code {exit_code} via {launch_mode}")
+            )
+        return result
+
+
+def _apply_browser_worker_result(state: SeedCrawlState, payload: dict[str, Any]) -> None:
+    status_hint = first_positive_status_code(payload.get("status_code_hint"), payload.get("last_status_code"))
+    if status_hint > 0:
+        state.recorder.note_status_hint(status_hint)
+
+    for reason, count in dict(payload.get("filtered_counts") or {}).items():
+        metric_key = f"pages_filtered_{str(reason).strip()}"
+        if int(count or 0) > 0:
+            state.metrics.inc(metric_key, int(count))
+    filtered_total = int(payload.get("filtered_urls") or 0)
+    if filtered_total > 0:
+        state.filtered_urls += filtered_total
+        state.metrics.inc("pages_filtered", filtered_total)
+
+    processed = {
+        normalize_url(str(url))
+        for url in payload.get("processed_urls", [])
+        if normalize_url(str(url))
+    }
+    for item in payload.get("results", []):
+        if not isinstance(item, dict):
+            continue
+        normalized_url = normalize_url(str(item.get("normalized_url") or ""))
+        requested_url = str(item.get("requested_url") or normalized_url or "")
+        if normalized_url:
+            processed.add(normalized_url)
+        emit_result = bool(item.get("emit_result"))
+        count_as_success = bool(item.get("count_as_success"))
+        result = state.recorder.record_result(
+            requested_url=requested_url,
+            normalized_url=normalized_url,
+            status_code=int(item.get("status_code") or 0),
+            content=str(item.get("content") or ""),
+            error_message=str(item.get("error_message") or ""),
+            attempt_count=int(item.get("attempt_count") or 1),
+            emit_result=emit_result,
+            count_as_success=count_as_success,
+            used_browser=True,
+        )
+        if count_as_success and emit_result and result is not None:
+            state.observe_success()
+        else:
+            state.observe_failure(
+                normalized_url=normalized_url or requested_url,
+                status_code=int(item.get("status_code") or 0),
+                error_message=str(item.get("error_message") or ""),
+            )
+
+    for normalized_url in sorted(processed):
+        if normalized_url not in state.processed_urls:
+            state.mark_processed(normalized_url)
+
+    if payload.get("error"):
+        raise RuntimeError(str(payload.get("error")))
+
+
+def _run_browser_crawl_dispatch(state: SeedCrawlState, initial_requests: list[QueueItem]) -> None:
+    if not initial_requests or state.remaining_browser_budget <= 0:
+        return
+    mode = _resolved_browser_isolation(state.cfg)
+    state.persist_runtime(force=True, status="running")
+    if mode == "subprocess":
+        payload = _run_browser_worker_subprocess(state, initial_requests)
+        _apply_browser_worker_result(state, payload)
+        return
+    _run_crawlee(_run_browser_crawl(state, initial_requests))
+
+
+def _seed_final_status(state: SeedCrawlState) -> str:
+    if state.seed_quarantined:
+        return "quarantined"
+    if state.seed_exception_reason and not state.recorder.has_success and state.recorder.run_pages_fetched == 0:
+        return "failed"
+    if state.stop_requested and not state.recorder.has_success and state.recorder.run_pages_fetched == 0:
+        return "stopped"
+    if state.recorder.has_success:
+        return "partial" if state.stop_requested or state.seed_exception_reason else "completed"
+    if state.recorder.run_pages_fetched:
+        return "partial"
+    return "empty"
+
+
+def _handle_seed_crawl_exception(state: SeedCrawlState, exc: Exception) -> None:
+    error_message = (str(exc) or exc.__class__.__name__).strip()
+    status_hint = first_positive_status_code(
+        status_code_from_error_text(exc),
+        _status_code_from_block_reason(state.browser_escalation_reason),
+        state.recorder.last_status_code,
+    )
+    if status_hint > 0:
+        state.recorder.note_status_hint(status_hint)
+
+    state.seed_exception_reason = error_message[:240]
+    state.current_error = state.seed_exception_reason
+    state.stop_requested = True
+    state.discovery_enabled = False
+    state._update_control_record(stop_requested=True)
+
+    action = "auto_stop_domain"
+    reason = "crawler_exception"
+    if state.browser_escalation_requested:
+        action = "auto_stop_domain"
+        reason = "browser_crawl_exception"
+
+    state._persist_intervention(
+        key=f"fatal:{action}:{reason}",
+        action=action,
+        reason=reason,
+        source="auto",
+        details={
+            "error": error_message[:200],
+            "status_code": status_hint,
+            "browser_reason": state.browser_escalation_reason,
+        },
+    )
+    state.metrics.inc("seed_crawl_exceptions")
+    state.logger.error(
+        "seed_crawl_exception",
+        extra={
+            "job_id": state.job_id,
+            "stage": "fetch",
+            "domain": state.domain,
+            "error": error_message[:240],
+            "status_code": status_hint,
+            "browser_reason": state.browser_escalation_reason,
+        },
+    )
 
 
 async def _run_http_crawl(state: SeedCrawlState, initial_requests: list[QueueItem]) -> None:
@@ -946,18 +1226,12 @@ async def _run_browser_crawl(state: SeedCrawlState, initial_requests: list[Queue
         await request_queue.drop()
 
 
-async def _run_seed_fetch_async(
+async def _run_http_seed_fetch_async(
     *,
     state: SeedCrawlState,
     initial_requests: list[QueueItem],
 ) -> None:
-    if state.policy.mode == "browser":
-        await _run_browser_crawl(state, initial_requests)
-        return
-
     await _run_http_crawl(state, initial_requests)
-    if state.browser_escalation_requested:
-        await _run_browser_crawl(state, state.remaining_queue_for_browser())
 
 
 def run_fetch(
@@ -1047,15 +1321,26 @@ def run_fetch(
             browser_page_limit=browser_limit,
             run_state_dir=run_state_dir,
         )
-        initial_requests = state.seed_initial_requests()
-
-        if initial_requests:
-            _run_crawlee(_run_seed_fetch_async(state=state, initial_requests=initial_requests))
-
-        recorder.finalize()
-        final_status = "completed" if recorder.has_success else ("quarantined" if state.seed_quarantined else ("stopped" if state.stop_requested else ("partial" if recorder.run_pages_fetched else "empty")))
-        state.persist_runtime(force=True, status=final_status)
-        discovered.extend(recorder.results)
+        try:
+            initial_requests = state.seed_initial_requests()
+            if initial_requests:
+                try:
+                    if state.policy.mode == "browser":
+                        _run_browser_crawl_dispatch(state, initial_requests)
+                    else:
+                        _run_crawlee(_run_http_seed_fetch_async(state=state, initial_requests=initial_requests))
+                        if state.browser_escalation_requested:
+                            _run_browser_crawl_dispatch(state, state.remaining_queue_for_browser())
+                except Exception as exc:
+                    _close_crawlee_loop()
+                    if isinstance(exc, sqlite3.Error):
+                        raise
+                    _handle_seed_crawl_exception(state, exc)
+        finally:
+            final_status = _seed_final_status(state)
+            recorder.finalize(final_status=final_status)
+            state.persist_runtime(force=True, status=final_status)
+            discovered.extend(recorder.results)
 
     con.commit()
     return discovered

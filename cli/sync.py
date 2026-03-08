@@ -11,7 +11,7 @@ from cli.doctor import run_init
 from pipeline.db import connect_db
 from pipeline.observability import Metrics, build_logger
 from pipeline.pipeline import DB_PATH, SCHEMA_PATH, PipelineRunner
-from pipeline.run_control import ensure_run_control, update_runtime_controls
+from pipeline.run_control import ensure_run_control, finalize_run_control
 from pipeline.run_state import (
     create_run_state,
     deserialize_seeds,
@@ -46,6 +46,8 @@ def _apply_runner_overrides(runner: PipelineRunner, args) -> None:
         ]
     if getattr(args, "crawlee_max_browser_pages", None) is not None:
         runner.config.crawlee_max_browser_pages_per_domain = max(1, args.crawlee_max_browser_pages)
+    if getattr(args, "crawlee_browser_isolation", None) is not None:
+        runner.config.crawlee_browser_isolation = str(args.crawlee_browser_isolation).strip().lower()
     if getattr(args, "crawlee_domain_policies_file", None) is not None:
         runner.config.crawlee_domain_policies_file = args.crawlee_domain_policies_file
     if getattr(args, "agent_research", None) is not None:
@@ -314,10 +316,11 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             state["report"] = report
             mark_run_completed(state, summary={"run_id": run_id, "discovered": 0}, report=report)
             save_run_state(state, checkpoint_dir)
-            update_runtime_controls(
+            finalize_run_control(
                 run_id,
-                lambda payload: payload.update({"status": "completed"}),
+                status="completed",
                 base_dir=checkpoint_dir,
+                replace_running_with="stopped",
             )
             runner._write_last_run_manifest(report)
             runner._write_daily_growth_summary(report)
@@ -537,10 +540,11 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
         )
         mark_run_completed(state, summary=summary, report=report)
         checkpoint_path = save_run_state(state, checkpoint_dir)
-        update_runtime_controls(
+        finalize_run_control(
             run_id,
-            lambda payload: payload.update({"status": "completed"}),
+            status="completed",
             base_dir=checkpoint_dir,
+            replace_running_with="stopped",
         )
         return {
             "run_id": run_id,
@@ -560,10 +564,12 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
                 message=cli_message,
             )
         save_run_state(state, checkpoint_dir)
-        update_runtime_controls(
+        finalize_run_control(
             run_id,
-            lambda payload: payload.update({"status": "failed"}),
+            status="failed",
             base_dir=checkpoint_dir,
+            replace_running_with="failed",
+            message=cli_message,
         )
         raise
 
