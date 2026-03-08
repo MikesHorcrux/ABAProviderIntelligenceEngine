@@ -32,6 +32,7 @@ python3.11 cannaradar_cli.py sync --json --resume latest
 - `search`: local query surface with text search and curated presets.
 - `sql`: read-only `SELECT` / `WITH` access to local SQLite state.
 - `export`: outreach/research/new/signal/quality outputs.
+- `sync` includes a post-score `research` stage that writes lead research summaries and `out/agent_research_queue.csv`.
 
 Legacy compatibility commands remain available:
 
@@ -99,7 +100,8 @@ Stages:
 2. `fetch`
 3. `enrich`
 4. `score`
-5. `export`
+5. `research`
+6. `export`
 
 Resume semantics:
 
@@ -121,6 +123,9 @@ Resume semantics:
 
 `search --preset low-confidence-leads`
 - lower-scored local leads for triage
+
+`search --preset research-needed`
+- leads that still have open agent-research gaps
 
 ## Runtime Control Shortcuts
 
@@ -185,4 +190,10 @@ Query local state directly:
 
 ```bash
 python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"
+```
+
+Inspect agent research output only:
+
+```bash
+python3.11 cannaradar_cli.py export --json --kind agent-research
 ```

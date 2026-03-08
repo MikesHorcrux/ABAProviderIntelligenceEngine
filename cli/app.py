@@ -45,6 +45,9 @@ def _add_sync_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--export-tier", default="A")
     parser.add_argument("--export-limit", type=int, default=200)
     parser.add_argument("--research-limit", type=int, default=200)
+    parser.add_argument("--agent-research", type=str, default=None, choices=["on", "off"])
+    parser.add_argument("--agent-research-limit", type=int, default=None)
+    parser.add_argument("--agent-research-min-score", type=int, default=None)
     parser.add_argument("--new-limit", type=int, default=100)
     parser.add_argument("--signal-limit", type=int, default=200)
     parser.add_argument("--weekly-lead-target", type=int, default=None)
@@ -87,7 +90,7 @@ def make_parser() -> argparse.ArgumentParser:
 
     search = sub.add_parser("search", help="Query local lead state or curated diagnostics presets.")
     search.add_argument("query", nargs="?", default=None)
-    search.add_argument("--preset", choices=["failed-domains", "blocked-domains", "stale-records", "low-confidence-leads"])
+    search.add_argument("--preset", choices=["failed-domains", "blocked-domains", "stale-records", "low-confidence-leads", "research-needed"])
     search.add_argument("--limit", type=int, default=20)
 
     status = sub.add_parser("status", help="Summarize last manifest, checkpoint state, DB counts, and recent failures.")
@@ -128,11 +131,12 @@ def make_parser() -> argparse.ArgumentParser:
     sql.add_argument("--query", dest="query_flag", default=None)
     sql.add_argument("--limit", type=int, default=200)
 
-    export = sub.add_parser("export", help="Export outreach, research, new leads, signals, or quality outputs.")
-    export.add_argument("--kind", default="all", choices=["all", "outreach", "research", "new", "signals", "quality"])
+    export = sub.add_parser("export", help="Export outreach, research, agent research, new leads, signals, or quality outputs.")
+    export.add_argument("--kind", default="all", choices=["all", "outreach", "research", "agent-research", "new", "signals", "quality"])
     export.add_argument("--tier", default="A")
     export.add_argument("--limit", type=int, default=200)
     export.add_argument("--research-limit", type=int, default=200)
+    export.add_argument("--agent-research-limit", type=int, default=200)
     export.add_argument("--new-limit", type=int, default=100)
     export.add_argument("--signal-limit", type=int, default=200)
     export.add_argument("--since", default=None)

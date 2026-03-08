@@ -86,6 +86,53 @@ PRESET_QUERIES = {
         ORDER BY COALESCE(ls.score_total, 0) ASC, l.updated_at DESC
         LIMIT ?
     """,
+    "research-needed": """
+        SELECT l.canonical_name AS company_name,
+               l.website_domain AS website,
+               l.state,
+               COALESCE((
+                 SELECT ls.score_total
+                 FROM lead_scores ls
+                 WHERE ls.location_pk = l.location_pk
+                 ORDER BY ls.as_of DESC
+                 LIMIT 1
+               ), 0) AS score,
+               COALESCE((
+                 SELECT e.field_value
+                 FROM evidence e
+                 WHERE e.entity_type = 'location'
+                   AND e.entity_pk = l.location_pk
+                   AND e.field_name = 'agent_research_status'
+                   AND COALESCE(e.deleted_at, '') = ''
+                 ORDER BY e.captured_at DESC
+                 LIMIT 1
+               ), '') AS research_status,
+               COALESCE((
+                 SELECT e.field_value
+                 FROM evidence e
+                 WHERE e.entity_type = 'location'
+                   AND e.entity_pk = l.location_pk
+                   AND e.field_name = 'agent_research_gaps'
+                   AND COALESCE(e.deleted_at, '') = ''
+                 ORDER BY e.captured_at DESC
+                 LIMIT 1
+               ), '') AS research_gaps
+        FROM locations l
+        WHERE COALESCE(l.deleted_at, '') = ''
+          AND COALESCE(l.website_domain, '') <> ''
+          AND COALESCE((
+            SELECT e.field_value
+            FROM evidence e
+            WHERE e.entity_type = 'location'
+              AND e.entity_pk = l.location_pk
+              AND e.field_name = 'agent_research_status'
+              AND COALESCE(e.deleted_at, '') = ''
+            ORDER BY e.captured_at DESC
+            LIMIT 1
+          ), 'research_needed') <> 'ready'
+        ORDER BY score DESC, l.updated_at DESC
+        LIMIT ?
+    """,
 }
 
 
@@ -174,6 +221,7 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
         "lock": _file_snapshot(LOCK_PATH),
         "outputs": {
             "research_queue": _file_snapshot(OUT_DIR / "research_queue.csv"),
+            "agent_research_queue": _file_snapshot(OUT_DIR / "agent_research_queue.csv"),
             "outreach_legacy": _file_snapshot(OUT_DIR / "outreach_dispensary_100.csv"),
             "quality": _file_snapshot(OUT_DIR / "quality_report.json"),
         },

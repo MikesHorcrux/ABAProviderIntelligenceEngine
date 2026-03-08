@@ -41,6 +41,25 @@ class CrawlConfig:
     require_net_new_gate: bool = True
     fail_on_zero_new_leads: bool = False
     output_stale_hours: int = 72
+    agent_research_enabled: bool = True
+    agent_research_limit: int = 25
+    agent_research_min_score: int = 48
+    agent_research_paths: list[str] = field(
+        default_factory=lambda: [
+            "/about",
+            "/team",
+            "/leadership",
+            "/our-team",
+            "/staff",
+            "/contact",
+            "/menu",
+            "/locations",
+            "/careers",
+            "/jobs",
+            "/brands",
+            "/vendors",
+        ]
+    )
     retry_base_delay_seconds: float = 1.25
     retry_factor: float = 1.9
     per_domain_min_interval_seconds: float = 1.25
@@ -141,6 +160,9 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
     require_net_new_gate = os.environ.get("CANNARADAR_REQUIRE_NET_NEW_GATE")
     fail_on_zero_new_leads = os.environ.get("CANNARADAR_FAIL_ON_ZERO_NEW_LEADS")
     output_stale_hours = os.environ.get("CANNARADAR_OUTPUT_STALE_HOURS")
+    agent_research_enabled = os.environ.get("CANNARADAR_AGENT_RESEARCH")
+    agent_research_limit = os.environ.get("CANNARADAR_AGENT_RESEARCH_LIMIT")
+    agent_research_min_score = os.environ.get("CANNARADAR_AGENT_RESEARCH_MIN_SCORE")
     retry_base_delay_seconds = os.environ.get("CANNARADAR_RETRY_BASE_DELAY_SECONDS")
     retry_factor = os.environ.get("CANNARADAR_RETRY_FACTOR")
     crawlee_headless = os.environ.get("CANNARADAR_CRAWLEE_HEADLESS")
@@ -214,6 +236,21 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
             ),
         ),
         output_stale_hours=int(output_stale_hours or data.get("outputStaleHours", defaults.output_stale_hours)),
+        agent_research_enabled=_coerce_bool(
+            agent_research_enabled,
+            _coerce_bool(
+                data.get("agentResearchEnabled"),
+                defaults.agent_research_enabled,
+            ),
+        ),
+        agent_research_limit=int(agent_research_limit or data.get("agentResearchLimit", defaults.agent_research_limit)),
+        agent_research_min_score=int(
+            agent_research_min_score or data.get("agentResearchMinScore", defaults.agent_research_min_score)
+        ),
+        agent_research_paths=_coalesce_list(
+            data.get("agentResearchPaths"),
+            defaults.agent_research_paths,
+        ),
         retry_base_delay_seconds=float(retry_base_delay_seconds or data.get("retryBaseDelaySeconds", defaults.retry_base_delay_seconds)),
         retry_factor=float(retry_factor or data.get("retryFactor", defaults.retry_factor)),
         cache_ttl_hours=int(data.get("cacheTtlHours", defaults.cache_ttl_hours)),

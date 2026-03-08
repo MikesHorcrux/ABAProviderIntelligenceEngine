@@ -39,6 +39,10 @@ def test_load_crawl_config_defaults_include_crawlee_settings() -> None:
     assert cfg.crawlee_viewport_height == 1024
     assert cfg.crawlee_max_browser_pages_per_domain == 5
     assert cfg.crawlee_domain_policies_file == "fetch_policies.json"
+    assert cfg.agent_research_enabled is True
+    assert cfg.agent_research_limit == 25
+    assert cfg.agent_research_min_score == 48
+    assert "/leadership" in cfg.agent_research_paths
 
 
 def test_env_overrides_apply_to_crawlee_settings() -> None:
@@ -52,6 +56,9 @@ def test_env_overrides_apply_to_crawlee_settings() -> None:
                     "crawleeProxyUrls": ["http://config-proxy:8080"],
                     "crawleeMaxBrowserPagesPerDomain": 3,
                     "crawleeDomainPoliciesFile": "fetch_policies.json",
+                    "agentResearchEnabled": True,
+                    "agentResearchLimit": 12,
+                    "agentResearchMinScore": 55,
                 }
             ),
             encoding="utf-8",
@@ -62,6 +69,9 @@ def test_env_overrides_apply_to_crawlee_settings() -> None:
             CANNARADAR_CRAWLEE_PROXY_URLS="http://env-proxy-1:8080,http://env-proxy-2:8080",
             CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN="9",
             CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE="ops/custom_policies.json",
+            CANNARADAR_AGENT_RESEARCH="on",
+            CANNARADAR_AGENT_RESEARCH_LIMIT="7",
+            CANNARADAR_AGENT_RESEARCH_MIN_SCORE="62",
         )
         try:
             cfg = load_crawl_config(config_path)
@@ -76,6 +86,9 @@ def test_env_overrides_apply_to_crawlee_settings() -> None:
         assert cfg.crawlee_max_browser_pages_per_domain == 9
         assert cfg.crawlee_domain_policies_file == "ops/custom_policies.json"
         assert cfg.resolved_crawlee_domain_policies_path() == (config_path.parent / "ops/custom_policies.json").resolve()
+        assert cfg.agent_research_enabled is True
+        assert cfg.agent_research_limit == 7
+        assert cfg.agent_research_min_score == 62
 
 
 def main() -> None:

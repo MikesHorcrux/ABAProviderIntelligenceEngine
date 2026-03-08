@@ -66,6 +66,14 @@ def _seed_demo_rows(db_path: Path) -> None:
     )
     con.execute(
         """
+        INSERT OR REPLACE INTO evidence
+        (evidence_pk, entity_type, entity_pk, field_name, field_value, source_url, snippet, captured_at, deleted_at)
+        VALUES ('ev_research_demo', 'location', 'loc_demo', 'agent_research_status', 'research_needed', 'https://demo.example', 'agent research', ?, '')
+        """,
+        (now,),
+    )
+    con.execute(
+        """
         INSERT OR REPLACE INTO seed_telemetry
         (seed_domain, seed_name, attempts, successes, failures, success_runs, failure_runs, consecutive_failures, last_status_code,
          last_success_at, last_failure_at, last_run_started_at, last_run_completed_at, last_run_status, last_run_pages_fetched,
@@ -171,6 +179,20 @@ def test_init_doctor_sql_and_search() -> None:
         assert code == 0
         assert payload["data"]["row_count"] == 1
         assert payload["data"]["rows"][0]["company_name"] == "Demo Dispensary"
+
+        code, payload = _run_cli(
+            [
+                "--json",
+                "--db",
+                str(db_path),
+                "search",
+                "--preset",
+                "research-needed",
+            ]
+        )
+        assert code == 0
+        assert payload["data"]["row_count"] == 1
+        assert payload["data"]["rows"][0]["research_status"] == "research_needed"
 
         state = create_run_state(
             run_id="demo-run",

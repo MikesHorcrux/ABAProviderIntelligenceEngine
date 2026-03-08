@@ -48,6 +48,12 @@ def _apply_runner_overrides(runner: PipelineRunner, args) -> None:
         runner.config.crawlee_max_browser_pages_per_domain = max(1, args.crawlee_max_browser_pages)
     if getattr(args, "crawlee_domain_policies_file", None) is not None:
         runner.config.crawlee_domain_policies_file = args.crawlee_domain_policies_file
+    if getattr(args, "agent_research", None) is not None:
+        runner.config.agent_research_enabled = args.agent_research == "on"
+    if getattr(args, "agent_research_limit", None) is not None:
+        runner.config.agent_research_limit = max(1, int(args.agent_research_limit))
+    if getattr(args, "agent_research_min_score", None) is not None:
+        runner.config.agent_research_min_score = max(0, min(100, int(args.agent_research_min_score)))
 
 
 def _seed_domains(discovery_seeds, monitoring_seeds) -> list[str]:
@@ -75,8 +81,11 @@ def _sync_options_from_args(args) -> dict[str, Any]:
         "export_tier": getattr(args, "export_tier", "A"),
         "export_limit": getattr(args, "export_limit", 200),
         "research_limit": getattr(args, "research_limit", 200),
+        "agent_research_limit": getattr(args, "agent_research_limit", None),
+        "agent_research_min_score": getattr(args, "agent_research_min_score", None),
         "new_limit": getattr(args, "new_limit", 100),
         "signal_limit": getattr(args, "signal_limit", 200),
+        "agent_research": getattr(args, "agent_research", None),
     }
 
 
@@ -157,9 +166,11 @@ def _build_run_summary(
         "parsed": metrics_snapshot.get("parse_success", 0),
         "resolved": metrics_snapshot.get("locations_enriched", 0),
         "scored": score_rows,
+        "researched": metrics_snapshot.get("agent_researched", 0),
         "exported": {
             "outreach": int((report.get("outreach") or {}).get("count", 0) or 0),
             "research": int((report.get("research_row_count") or 0)),
+            "agent_research": int((report.get("agent_research_row_count") or 0)),
             "new_leads": int((report.get("discovery_metrics") or {}).get("new_leads_count", 0) or 0),
             "callable_leads": int((report.get("discovery_metrics") or {}).get("callable_leads_count", 0) or 0),
         },
@@ -182,6 +193,7 @@ def _no_work_report(
     return {
         "outreach": "",
         "research": "",
+        "agent_research": "",
         "merge_suggestions": "",
         "quality": {},
         "new_leads": "",
@@ -383,6 +395,32 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             )
             save_run_state(state, checkpoint_dir)
 
+        if state["stages"]["research"]["status"] != "completed":
+            mark_stage_started(state, "research")
+            save_run_state(state, checkpoint_dir)
+            research_result = runner.run_lead_research(
+                since=str(state.get("export_since") or ""),
+                limit=(
+                    int(options.get("agent_research_limit"))
+                    if options.get("agent_research_limit") not in (None, "")
+                    else None
+                ),
+                min_score=(
+                    int(options.get("agent_research_min_score"))
+                    if options.get("agent_research_min_score") not in (None, "")
+                    else None
+                ),
+            )
+            mark_stage_completed(
+                state,
+                "research",
+                {
+                    **research_result,
+                    "metrics": copy.deepcopy(runner.metrics.snapshot()),
+                },
+            )
+            save_run_state(state, checkpoint_dir)
+
         if state["stages"]["export"]["status"] != "completed":
             mark_stage_started(state, "export")
             save_run_state(state, checkpoint_dir)
@@ -399,6 +437,7 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
                 report = {
                     "outreach": "",
                     "research": "",
+                    "agent_research": "",
                     "merge_suggestions": "",
                     "quality": {},
                     "new_leads": "",
@@ -429,15 +468,25 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
                 tier=str(options.get("export_tier") or "A"),
                 limit=int(options.get("export_limit") or 200),
                 research_limit=int(options.get("research_limit") or 200),
+                agent_research_limit=(
+                    int(options.get("agent_research_limit"))
+                    if options.get("agent_research_limit") not in (None, "")
+                    else None
+                ),
                 since=str(state.get("export_since") or ""),
                 new_limit=int(options.get("new_limit") or 100),
                 signal_limit=int(options.get("signal_limit") or 200),
             )
             research_path = Path(str(report.get("research") or ""))
+            agent_research_path = Path(str(report.get("agent_research") or ""))
             report["research_row_count"] = 0
             if research_path.exists():
                 with research_path.open(encoding="utf-8") as f:
                     report["research_row_count"] = max(0, sum(1 for _ in f) - 1)
+            report["agent_research_row_count"] = 0
+            if agent_research_path.exists():
+                with agent_research_path.open(encoding="utf-8") as f:
+                    report["agent_research_row_count"] = max(0, sum(1 for _ in f) - 1)
             report.update(
                 {
                     "status": "passed" if reliability["passed"] else "degraded",
@@ -558,6 +607,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             tier=getattr(args, "tier", "A"),
             limit=getattr(args, "limit", 200),
             research_limit=getattr(args, "research_limit", 200),
+            agent_research_limit=getattr(args, "agent_research_limit", None),
             since=getattr(args, "since", None),
             new_limit=getattr(args, "new_limit", 100),
             signal_limit=getattr(args, "signal_limit", 200),
@@ -567,6 +617,11 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
         if research_path.exists():
             with research_path.open(encoding="utf-8") as f:
                 result["research_row_count"] = max(0, sum(1 for _ in f) - 1)
+        agent_research_path = Path(str(result.get("agent_research") or ""))
+        result["agent_research_row_count"] = 0
+        if agent_research_path.exists():
+            with agent_research_path.open(encoding="utf-8") as f:
+                result["agent_research_row_count"] = max(0, sum(1 for _ in f) - 1)
         return result
     if kind == "quality":
         return runner.run_quality()
@@ -575,6 +630,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             tier=getattr(args, "tier", "A"),
             limit=getattr(args, "limit", 200),
             research_limit=0,
+            agent_research_limit=0,
             new_limit=0,
             signal_limit=0,
         )
@@ -583,6 +639,17 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             tier="C",
             limit=0,
             research_limit=getattr(args, "research_limit", 200),
+            agent_research_limit=0,
+            new_limit=0,
+            signal_limit=0,
+        )
+    if kind == "agent-research":
+        return runner.run_export(
+            tier="C",
+            limit=0,
+            research_limit=0,
+            agent_research_limit=getattr(args, "agent_research_limit", 200),
+            since=getattr(args, "since", None),
             new_limit=0,
             signal_limit=0,
         )
@@ -591,6 +658,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             tier="C",
             limit=0,
             research_limit=0,
+            agent_research_limit=0,
             since=getattr(args, "since", None),
             new_limit=getattr(args, "new_limit", 100),
             signal_limit=0,
@@ -600,6 +668,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             tier="C",
             limit=0,
             research_limit=0,
+            agent_research_limit=0,
             since=getattr(args, "since", None),
             new_limit=0,
             signal_limit=getattr(args, "signal_limit", 200),

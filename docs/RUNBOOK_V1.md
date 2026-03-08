@@ -50,6 +50,7 @@ Agent diagnostics:
 ```bash
 python3.11 cannaradar_cli.py search --json --preset failed-domains
 python3.11 cannaradar_cli.py search --json --preset blocked-domains
+python3.11 cannaradar_cli.py search --json --preset research-needed
 python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"
 ```
 
@@ -137,6 +138,7 @@ Outputs:
 - `out/excluded_non_dispensary.csv`
 - `out/merge_suggestions_<YYYYMMDD-HHMMSS>.csv`
 - `out/research_queue.csv`
+- `out/agent_research_queue.csv`
 - `out/v4_quality_report.txt`
 - `out/quality_report.json`
 - `out/changes_<YYYYMMDD-HHMMSS>.csv`
@@ -157,6 +159,7 @@ Outputs:
 - Confirm `out/outreach_dispensary_100.csv` exists and has header `segment`.
 - Confirm all rows in this file are `segment == dispensary`.
 - Confirm `out/research_queue.csv` is not empty when discovery footprint is expected.
+- Confirm `out/agent_research_queue.csv` is generated when scored leads exist.
 - Confirm `out/v4_quality_report.txt` and `out/quality_report.json` are generated.
 - Confirm manifest and metrics files exist and include run identifiers.
 

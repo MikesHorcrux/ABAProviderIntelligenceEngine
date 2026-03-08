@@ -5,6 +5,8 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from pipeline.config import CrawlConfig
+from pipeline.stages.research import build_lead_research_briefs
 from pipeline.utils import utcnow_iso
 
 
@@ -454,6 +456,76 @@ def export_research_queue(con, out_dir: Path, limit: int = 200, run_id: str = ""
         writer.writeheader()
         for row in candidates:
             writer.writerow(row)
+    return str(out_path)
+
+
+def export_agent_research_queue(
+    con,
+    out_dir: Path,
+    *,
+    cfg: CrawlConfig,
+    since: str | None = None,
+    limit: int = 200,
+    min_score: int | None = None,
+    run_id: str = "",
+) -> str:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "agent_research_queue.csv"
+    headers = [
+        "company_name",
+        "website",
+        "state",
+        "score",
+        "tier",
+        "research_status",
+        "contact_name",
+        "contact_title",
+        "email",
+        "phone",
+        "menu_provider",
+        "proof_urls",
+        "social_urls",
+        "gaps",
+        "target_roles",
+        "suggested_paths",
+        "recommended_action",
+        "enhancement_summary",
+    ]
+    briefs = []
+    if int(limit) > 0:
+        briefs = build_lead_research_briefs(
+            con,
+            cfg=cfg,
+            since=since,
+            min_score=int(min_score if min_score is not None else cfg.agent_research_min_score),
+            limit=limit,
+        )
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for brief in briefs:
+            writer.writerow(
+                {
+                    "company_name": brief.company_name,
+                    "website": brief.website,
+                    "state": brief.state,
+                    "score": str(brief.score),
+                    "tier": brief.tier,
+                    "research_status": brief.research_status,
+                    "contact_name": brief.contact_name,
+                    "contact_title": brief.contact_title,
+                    "email": brief.email,
+                    "phone": brief.phone,
+                    "menu_provider": brief.menu_provider,
+                    "proof_urls": brief.proof_urls,
+                    "social_urls": brief.social_urls,
+                    "gaps": "; ".join(brief.gaps),
+                    "target_roles": "; ".join(brief.target_roles),
+                    "suggested_paths": "; ".join(brief.suggested_paths),
+                    "recommended_action": brief.recommended_action,
+                    "enhancement_summary": brief.enhancement_summary,
+                }
+            )
     return str(out_path)
 
 

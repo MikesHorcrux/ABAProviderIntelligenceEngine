@@ -16,10 +16,12 @@ from pipeline.stages.fetch import FetchResult, run_fetch
 from pipeline.stages.parse import ParsedPage, dedupe_signals, parse_page
 from pipeline.stages.resolve import ResolvedLocation, resolve_and_upsert_locations
 from pipeline.stages.enrich import run_waterfall_enrichment
+from pipeline.stages.research import run_lead_research
 from pipeline.stages.score import run_score
 from pipeline.stages.export import (
     _copy_latest_csv,
     _csv_row_count,
+    export_agent_research_queue,
     export_buyer_signal_queue,
     export_merge_suggestions,
     export_new_leads,
@@ -839,6 +841,29 @@ class PipelineRunner:
         log_stage_end(self.logger, "score", self.job_id, start, self.metrics.snapshot())
         return self.metrics.snapshot().get("scores_written", 0)
 
+    def run_lead_research(
+        self,
+        *,
+        since: str | None = None,
+        limit: int | None = None,
+        min_score: int | None = None,
+    ) -> dict[str, object]:
+        start = log_stage_start(self.logger, "research", self.job_id)
+        con = connect_db(self.db_path, SCHEMA_PATH)
+        result = run_lead_research(
+            con,
+            cfg=self.config,
+            run_id=self.job_id,
+            since=since,
+            limit=limit,
+            min_score=min_score,
+        )
+        con.close()
+        self.metrics.inc("agent_researched", int(result.get("researched_locations", 0) or 0))
+        self.metrics.inc("agent_enhanced", int(result.get("enhanced_locations", 0) or 0))
+        log_stage_end(self.logger, "research", self.job_id, start, self.metrics.snapshot())
+        return result
+
     def run_export(
         self,
         tier: str = "A",
@@ -847,10 +872,24 @@ class PipelineRunner:
         since: str | None = None,
         new_limit: int = 100,
         signal_limit: int = 200,
+        agent_research_limit: int | None = None,
     ) -> dict[str, object]:
         con = connect_db(self.db_path, SCHEMA_PATH)
         result = export_outreach(con, OUT_DIR, tier=tier, limit=limit, run_id=self.job_id)
         research_path = export_research_queue(con, OUT_DIR, limit=research_limit, run_id=self.job_id)
+        agent_research_path = export_agent_research_queue(
+            con,
+            OUT_DIR,
+            cfg=self.config,
+            since=since,
+            limit=(
+                int(agent_research_limit)
+                if agent_research_limit is not None
+                else int(self.config.agent_research_limit)
+            ),
+            min_score=self.config.agent_research_min_score,
+            run_id=self.job_id,
+        )
         merge_report = export_merge_suggestions(con, OUT_DIR, run_id=self.job_id)
         quality = run_quality_report(con, OUT_DIR)
         new_leads = export_new_leads(
@@ -883,6 +922,7 @@ class PipelineRunner:
         return {
             "outreach": result,
             "research": research_path,
+            "agent_research": agent_research_path,
             "merge_suggestions": merge_report,
             "quality": quality,
             "new_leads": new_leads,
@@ -931,6 +971,7 @@ class PipelineRunner:
             "growth_governor": payload.get("growth_governor", {}),
             "quality": payload.get("quality", {}),
             "outreach": payload.get("outreach", {}),
+            "agent_research": payload.get("agent_research", ""),
         }
         DAILY_GROWTH_SUMMARY_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
@@ -999,6 +1040,7 @@ class PipelineRunner:
             if fetched:
                 self.run_enrich(fetched=fetched)
                 self.run_score()
+                self.run_lead_research(since=(datetime.now() - timedelta(days=7)).isoformat(timespec="seconds"))
             con = connect_db(self.db_path, SCHEMA_PATH)
             reliability = self._run_reliability_gate(
                 con,
@@ -1011,6 +1053,7 @@ class PipelineRunner:
                 report = {
                     "outreach": "",
                     "research": "",
+                    "agent_research": "",
                     "merge_suggestions": "",
                     "quality": {},
                     "new_leads": "",
@@ -1039,6 +1082,7 @@ class PipelineRunner:
                 tier="A",
                 limit=200,
                 research_limit=200,
+                agent_research_limit=self.config.agent_research_limit,
                 since=last_week_cutoff,
                 new_limit=100,
                 signal_limit=200,
@@ -1073,6 +1117,7 @@ class PipelineRunner:
         report = {
             "outreach": "",
             "research": "",
+            "agent_research": "",
             "merge_suggestions": "",
             "quality": {},
             "new_leads": "",

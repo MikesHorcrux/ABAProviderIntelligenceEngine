@@ -20,6 +20,7 @@ If the task is code-specific, then read only the files for the stage you are cha
 - Parse: `pipeline/stages/parse.py`
 - Resolve: `pipeline/stages/resolve.py`
 - Score: `pipeline/stages/score.py`
+- Lead research/enhancement: `pipeline/stages/research.py`
 - Exports/contracts: `pipeline/stages/export.py`, `jobs/export_changes.py`
 - Schema/migrations: `db/schema.sql`, `jobs/ingest_sources.py`
 
@@ -47,6 +48,7 @@ For local diagnostics during or after a run:
 ```bash
 python3.11 cannaradar_cli.py search --json --preset failed-domains
 python3.11 cannaradar_cli.py search --json --preset blocked-domains
+python3.11 cannaradar_cli.py search --json --preset research-needed
 python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"
 ```
 
@@ -56,6 +58,7 @@ python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status
 - Prefer bounded live runs first: `25`, then `50`, then `100`, then full seed inventory.
 - Treat `data/state/agent_runs/run_<run_id>.json` as the primary checkpoint for resumability and runtime diagnostics.
 - Use `status --json` instead of guessing whether a run is progressing.
+- Use `out/agent_research_queue.csv` as the first artifact for agent follow-up once a run scores leads.
 - If a live run is interrupted, resume from the checkpoint before starting a new run unless the checkpoint is clearly corrupt.
 
 ## Live-Run Failure Heuristics
@@ -86,6 +89,7 @@ Run from repo root with Python 3.11:
 - `PYTHONPATH=$PWD python3.11 tests/test_agent_cli.py`
 - `PYTHONPATH=$PWD python3.11 tests/test_run_state.py`
 - `PYTHONPATH=$PWD python3.11 tests/test_fetch_config.py`
+- `PYTHONPATH=$PWD python3.11 tests/test_lead_research.py`
 - `PYTHONPATH=$PWD python3.11 tests/test_fetch_dispatch.py`
 - `PYTHONPATH=$PWD python3.11 tests/test_parse_stage.py`
 - `PYTHONPATH=$PWD python3.11 tests/test_resolve_stage.py`

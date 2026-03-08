@@ -14,6 +14,7 @@ The canonical agent surface is the CLI plus run-state files:
 - `cannaradar_cli.py search`
 - `cannaradar_cli.py sql`
 - `cannaradar_cli.py export`
+- `cannaradar_cli.py control`
 
 Prefer `--json` for agent workflows.
 
@@ -31,6 +32,7 @@ Read these first:
 - Resolve: `pipeline/stages/resolve.py`
 - Score: `pipeline/stages/score.py`
 - Export contracts: `pipeline/stages/export.py`, `jobs/export_changes.py`
+- Lead research/enhancement: `pipeline/stages/research.py`
 
 ## Safe Edit Principles
 
@@ -45,6 +47,7 @@ Read these first:
 - Start uncertain environments with `init` and `doctor`.
 - Prefer bounded live runs before full inventory runs.
 - Use `status --json` and checkpoint files to diagnose progress instead of relying on terminal noise.
+- Use `out/agent_research_queue.csv` and `search --preset research-needed` to decide which leads still need agent follow-up.
 - Resume interrupted runs with `sync --resume latest` when the checkpoint is still valid.
 - Treat repeated asset/static/blog churn in fetch as URL-filter debt, not as proof the pipeline is healthy.
 - Treat malformed seed domains as seed-quality issues first.

@@ -40,6 +40,10 @@ class FakeRunner:
             weekly_new_lead_target=100,
             growth_window_days=7,
             enforce_growth_governor=True,
+            agent_research_enabled=True,
+            agent_research_limit=25,
+            agent_research_min_score=48,
+            agent_research_paths=["/about", "/team"],
             crawlee_headless=True,
             crawlee_proxy_urls=[],
             crawlee_max_browser_pages_per_domain=5,
@@ -99,15 +103,29 @@ class FakeRunner:
     def run_score(self):
         return 0
 
+    def run_lead_research(self, **_kwargs):
+        self.metrics.inc("agent_researched")
+        self.metrics.inc("agent_enhanced")
+        return {
+            "enabled": True,
+            "researched_locations": 1,
+            "ready_locations": 0,
+            "enhanced_locations": 1,
+            "research_needed_locations": 0,
+        }
+
     def _run_reliability_gate(self, *_args, **_kwargs):
         return {"passed": True, "failed": False, "reason": ""}
 
     def run_export(self, **_kwargs):
         research = self.db_path.parent / "research_queue.csv"
         research.write_text("company_name,website\nResume Seed,resume.example\n", encoding="utf-8")
+        agent_research = self.db_path.parent / "agent_research_queue.csv"
+        agent_research.write_text("company_name,website\nResume Seed,resume.example\n", encoding="utf-8")
         return {
             "outreach": {"count": 0},
             "research": str(research),
+            "agent_research": str(agent_research),
             "merge_suggestions": "",
             "quality": {},
             "new_leads": "",
@@ -209,6 +227,7 @@ def test_execute_sync_can_resume_from_checkpoint() -> None:
 
         assert result["summary"]["discovered"] == 1
         assert resumed["status"] == "completed"
+        assert resumed["stages"]["research"]["status"] == "completed"
         assert resumed["stages"]["export"]["status"] == "completed"
 
 

@@ -9,7 +9,7 @@ from pipeline.utils import utcnow_iso
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RUN_STATE_DIR = ROOT / "data" / "state" / "agent_runs"
-STAGE_ORDER = ("discovery", "fetch", "enrich", "score", "export")
+STAGE_ORDER = ("discovery", "fetch", "enrich", "score", "research", "export")
 RUN_STATE_SCHEMA_VERSION = "run_state.v1"
 
 

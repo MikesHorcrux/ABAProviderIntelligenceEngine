@@ -23,7 +23,8 @@ flowchart TD
     Parse --> Resolve
     Resolve --> Enrich
     Enrich --> Score
-    Score --> Export
+    Score --> Research[Lead Research]
+    Research --> Export
     Export --> Reports[Quality + Change reports]
     Export --> Outreach[Outreach workflows]
     Outreach --> Feedback[jobs/log_outreach_event.py]
@@ -44,9 +45,10 @@ flowchart TD
   - `pipeline/stages/fetch.py`: public fetch entrypoint backed by Crawlee HTTP crawl + Playwright escalation.
   - `pipeline/stages/parse.py`: page extraction logic.
   - `pipeline/stages/resolve.py`: entity dedupe and merge suggestions.
-  - `pipeline/stages/enrich.py`: enrichment steps.
-  - `pipeline/stages/score.py`: feature scoring.
-  - `pipeline/stages/export.py`: deterministic CSV/report outputs.
+- `pipeline/stages/enrich.py`: enrichment steps.
+- `pipeline/stages/score.py`: feature scoring.
+- `pipeline/stages/research.py`: agent research briefs and lead enhancement summaries.
+- `pipeline/stages/export.py`: deterministic CSV/report outputs.
 - `cli/`: canonical agent-ops command implementations, output envelopes, diagnostics, and resume logic.
 - `jobs/`
   - `jobs/ingest_sources.py`: schema/migration bootstrap + hard checks.
@@ -72,6 +74,7 @@ flowchart TD
 - `python3.11 cannaradar_cli.py search --json --preset failed-domains`
 - `python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"`
 - `python3.11 cannaradar_cli.py export --json --kind all`
+- `python3.11 cannaradar_cli.py export --json --kind agent-research`
 - `./run_v4.sh`
 
 ### Legacy compatibility aliases
@@ -100,6 +103,8 @@ Canonical automation loop:
 4. `python3.11 cannaradar_cli.py status --json`
 5. `python3.11 cannaradar_cli.py export --json --kind all`
 
+`sync` now includes a post-score `research` stage that builds agent-ready lead briefs, persists gap summaries in `evidence`, and emits `out/agent_research_queue.csv`.
+
 Resume loop after interruption:
 
 1. `python3.11 cannaradar_cli.py status --json`
@@ -114,6 +119,7 @@ The canonical commands emit a stable `cli.v1` JSON envelope when `--json` is use
 - `out/excluded_non_dispensary.csv`
 - `out/merge_suggestions_<YYYYMMDD-HHMMSS>.csv`
 - `out/research_queue.csv`
+- `out/agent_research_queue.csv`
 - `out/v4_quality_report.txt`
 - `out/quality_report.json`
 - `out/changes_<YYYYMMDD-HHMMSS>.csv`
@@ -135,6 +141,10 @@ The canonical commands emit a stable `cli.v1` JSON envelope when `--json` is use
 
 `company_name, website, contact_name, contact_title, email, phone, state, recommended_action, score`
 
+### Agent research queue row
+
+`company_name, website, state, score, tier, research_status, contact_name, contact_title, email, phone, menu_provider, proof_urls, social_urls, gaps, target_roles, suggested_paths, recommended_action, enhancement_summary`
+
 ## Stage behavior and invariants
 
 - Discovery: seeds are canonicalized and deduped by website+state.
@@ -143,6 +153,7 @@ The canonical commands emit a stable `cli.v1` JSON envelope when `--json` is use
 - Resolve: deterministic matching and merge suggestions; no destructive merges.
 - Enrich: first-party signals first; email inference is explicit low-confidence only.
 - Score: persisted feature vector per location and auditable tiers.
+- Research: agent-ready lead brief with gap analysis, target roles, suggested public paths, and recommended next action.
 - Export: segment filter and rank logic are deterministic and reproducible.
 
 ## Quality and explainability
