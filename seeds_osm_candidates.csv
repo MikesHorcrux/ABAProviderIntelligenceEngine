@@ -1,24 +1,4 @@
 name,website,state,market
-Curaleaf,https://curaleaf.com,multi,rec+medical
-Trulieve,https://www.trulieve.com,multi,rec+medical
-Green Thumb Industries,https://www.gtigrows.com,multi,rec+medical
-Verano,https://verano.com,multi,rec+medical
-Cresco Labs,https://www.crescolabs.com,multi,rec+medical
-Ayr Wellness,https://ayrwellness.com,multi,rec+medical
-Jushi Holdings,https://jushico.com,multi,rec+medical
-Planet 13,https://planet13.com,NV/CA/IL,rec
-Glass House Brands,https://glasshousebrands.com,CA,rec
-Cannabist Company,https://cannabistcompany.com,multi,rec+medical
-Cookies,https://cookies.co,multi,rec
-STIIIZY,https://stiiizy.com,CA,rec
-The Flowery,https://theflowery.co,FL,medical
-Fluent,https://getfluent.com,multi,medical
-The Source+,https://thesourcenv.com,NV,rec
-Mint Cannabis,https://mintdeals.com,AZ/IL,rec+medical
-NuWu,https://nuwu.vegas,NV,rec
-Native Roots,https://nativerootscannabis.com,CO,rec+medical
-Lightshade,https://lightshade.com,CO,rec
-Terrapin Care Station,https://www.terrapincarestation.com,CO,rec+medical
 Altitude Safford Dispensary,https://altitudemenu.com,AZ,rec+medical
 Bloom Dispensary,https://bloomdispensary.com,AZ,rec+medical
 Dr Reeferalz,https://drreeferalz.com,AZ,rec+medical
@@ -26,6 +6,7 @@ Giving Tree Dispensary,https://givingtreedispensary.com,AZ,rec+medical
 GreenPharms Dispensary,https://greenpharms.com,AZ,rec+medical
 Hana Dispensary,https://hanadispensaries.com,AZ,rec+medical
 JARS,https://az.jarscannabis.com,AZ,rec+medical
+Nature's Secret CBD,https://cbdandoils.com,AZ,rec+medical
 Nature's Wonder Dispensary,https://natureswonderaj.com,AZ,rec+medical
 Noble Herb,https://nobleherbaz.com,AZ,rec+medical
 Releaf 85624,https://dbloomtucson.com,AZ,rec+medical
@@ -54,9 +35,11 @@ Canopy Club,https://canopysb.com,CA,rec
 CBCB,https://cbcbberkeley.com,CA,rec
 Central Coast Wellness Center,https://centralcoastwellnesscenter.org,CA,rec
 City Compassionate Caregivers,https://citycompassionatecaregivers.com,CA,rec
+Coachella Valley Church,https://coachellavalley.church,CA,rec
 Coastal,https://coastalcalifornia.com,CA,rec
 Cookies,https://cookiesfresno.co,CA,rec
 Death Valley Junction Fine Cannabis,https://dvjfinecannabis.com,CA,rec
+Delta Health & Wellness,https://weedmaps.com,CA,rec
 Doobie Nights,https://doobienights.com,CA,rec
 Dr. Greenthumb's Fresno Cannabis Dispensary,https://doctorgreenthumbs.com,CA,rec
 Eaze,https://eazedispensary.com,CA,rec
@@ -80,6 +63,7 @@ High Sierra June Lake,https://highsierrajunelake.com,CA,rec
 Higher Level,https://tpg420.com,CA,rec
 HPRC Eureka - Humboldt Patient Resource Center Cannabis Dispensary,https://hprcdispensary.com,CA,rec
 Humboldt Premium,https://humboldtspremium.com,CA,rec
+Infuzion CBD Sciences,https://infuzioncbd.com,CA,rec
 Jade Leaf,https://jadeleafww.com,CA,rec
 Juba,https://shopjuva.com,CA,rec
 Kind Farma,https://kindfarma.com,CA,rec
@@ -116,6 +100,7 @@ Seaweed SF,https://seaweedsf.com,CA,rec
 Solful,https://solful.com,CA,rec
 Sunset Pipeline,https://sunsetpipeline.com,CA,rec
 Synergy,https://synergy-redding.com,CA,rec
+Tahoe CBD,https://tahoecbd.com,CA,rec
 Tahoe Wellness Center,https://tahoewellness.com,CA,rec
 The Artist Tree,https://theartisttree.com,CA,rec
 The Bloom Room,https://bloomroomsf.com,CA,rec
@@ -141,8 +126,10 @@ Ascend Cannabis Co,https://ascendcannabisco.com,CO,rec+medical
 bgood Northglenn,https://bgoodmmj.com,CO,rec+medical
 Billo Premium Cannabis,https://mybillo.com,CO,rec+medical
 Cannabis Studio,https://mycannabisstudio.com,CO,rec+medical
+CannacoCBD,https://cannacocbd.com,CO,rec+medical
 Cherry Peak Dispensary,https://yumaway.com,CO,rec+medical
 Colorado Exotic Harvest Company,https://coloradoharvestcompany.com,CO,rec+medical
+Discover CBD,https://discovercbd.com,CO,rec+medical
 Dispensary of Denver Leafb,https://leafbuyer.com,CO,rec+medical
 Eclipse Cannabis,https://eclipsecannabis.com,CO,rec+medical
 Elevated Dispensary,https://elevatedlongmont.com,CO,rec+medical
@@ -153,6 +140,7 @@ Five Star Grow Supply,https://fivestargrowsupply.com,CO,rec+medical
 Freedom Road,https://freedomroad.com,CO,rec+medical
 Frost Exotic Cannabis,https://frostdenverdispensary.com,CO,rec+medical
 Galaxy Greens,https://galaxygreens.com,CO,rec+medical
+Gold Care Natural Agricultural Products,https://goldcarecbd.com,CO,rec+medical
 Good Chemistry,https://goodchem.org,CO,rec+medical
 Green Cross Caregivers,https://cannabisdenver.com,CO,rec+medical
 Green Dragon,https://greendragon.com,CO,rec+medical
@@ -192,6 +180,7 @@ Terps Dispensary,https://terpsdispensary.com,CO,rec+medical
 Terry's Natural Market,https://terrysnaturals.com,CO,rec+medical
 The Bud Depot,https://buddepotdispensary.com,CO,rec+medical
 The Cannabis Depot,https://cannabisdepotco.com,CO,rec+medical
+The CBD Store,https://cbdstoregreeley.com,CO,rec+medical
 The Dispo,https://the-dispo.business.site,CO,rec+medical
 The Farm Recreational Marihuana Dispensary,https://thefarmco.com,CO,rec+medical
 The Giving Tree Marijuana,https://tgtree.com,CO,rec+medical
@@ -276,6 +265,8 @@ Theory Wellness,https://theorywellness.org,MA,rec
 Toy Town Health Care,https://toytownthc.com,MA,rec
 Verilife,https://verilife.com,MA,rec
 Western Front,https://westernfrontus.com,MA,rec
+Your CBD Store Brookline,https://brookline560.cbdrx4u.com,MA,rec
+CBD Republic,https://cbd-republic.com,MO,rec+medical
 Codes,https://codesdispensary.com,MO,rec+medical
 Fresh Karma,https://freshkarmakc.com,MO,rec+medical
 From the Earth Dispensary,https://ftemo.com,MO,rec+medical
@@ -291,6 +282,7 @@ Swin Dispensaries,https://swindispensaries.com,MO,rec+medical
 Greenlight Marijuana Dispensary Ely,https://greenlightdispensary.com,NV,rec
 Inyo Fine Cannabis Dispensary,https://inyolasvegas.com,NV,rec
 J. Whitney & co.,https://jwhitneyco.com,NV,rec
+Natural CBD CBG For Me,https://cbdcbgforme.com,NV,rec
 Planet 13 Las Vegas Marijuana Dispensary,https://planet13lasvegas.com,NV,rec
 RISE,https://risecannabis.com,NV,rec
 AYR Dispensary Goshen,https://ayrdispensaries.com,OH,rec+medical
@@ -299,7 +291,9 @@ Bloom Medicinals,https://bloomohio.com,OH,rec+medical
 Columbia Care Dispensary,https://oh.columbia.care,OH,rec+medical
 Culture of Akron,https://cultureofakron.com,OH,rec+medical
 Nectar,https://nectarohio.com,OH,rec+medical
+Ohio CBD Guy,https://ohiocbdguy.com,OH,rec+medical
 Saphyre Dispensary,https://saphyredispensary.com,OH,rec+medical
 The Botanist,https://shopbotanistohio.com,OH,rec+medical
+The CBD Dispensary,https://purecbd1.com,OH,rec+medical
 The Landing Dispensary,https://thelandingdispensaries.com,OH,rec+medical
 The Vault,https://thevaultoh.com,OH,rec+medical
