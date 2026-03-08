@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from cli.errors import ConfigError, DataValidationError
+from pipeline.run_control import load_run_control, summarize_run_control
 from pipeline.run_state import latest_run_state, load_run_state
 
 
@@ -131,6 +132,14 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
     if checkpoint is None:
         checkpoint = latest_run_state(run_state_dir)
 
+    control_summary: dict[str, Any] = {}
+    control_run_id = str((checkpoint or {}).get("run_id") or run_id or "")
+    if control_run_id:
+        try:
+            control_summary = summarize_run_control(load_run_control(control_run_id, run_state_dir))
+        except Exception:
+            control_summary = {}
+
     db_summary: dict[str, Any] = {}
     recent_failures: list[dict[str, Any]] = []
     if Path(db_path).expanduser().resolve().exists():
@@ -161,6 +170,7 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
         "db": {"path": str(Path(db_path).expanduser().resolve()), **db_summary},
         "manifest": manifest,
         "checkpoint": checkpoint or {},
+        "control": control_summary,
         "lock": _file_snapshot(LOCK_PATH),
         "outputs": {
             "research_queue": _file_snapshot(OUT_DIR / "research_queue.csv"),

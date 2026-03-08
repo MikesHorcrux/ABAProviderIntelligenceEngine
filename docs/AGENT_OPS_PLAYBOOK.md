@@ -28,6 +28,7 @@ python3.11 cannaradar_cli.py sync --json --resume latest
 - `sync`: checkpointed batch crawl with resumable stage boundaries.
 - `tail`: repeated `sync` loop for monitoring workflows.
 - `status`: latest manifest, checkpoint, DB summary, recent failures.
+- `control`: bounded runtime interventions for active or resumable runs.
 - `search`: local query surface with text search and curated presets.
 - `sql`: read-only `SELECT` / `WITH` access to local SQLite state.
 - `export`: outreach/research/new/signal/quality outputs.
@@ -83,6 +84,7 @@ Schema docs live under:
 - `docs/schemas/cli/v1/sync.json`
 - `docs/schemas/cli/v1/tail.json`
 - `docs/schemas/cli/v1/status.json`
+- `docs/schemas/cli/v1/control.json`
 - `docs/schemas/cli/v1/search.json`
 - `docs/schemas/cli/v1/sql.json`
 - `docs/schemas/cli/v1/export.json`
@@ -119,6 +121,32 @@ Resume semantics:
 
 `search --preset low-confidence-leads`
 - lower-scored local leads for triage
+
+## Runtime Control Shortcuts
+
+Inspect live controls:
+
+```bash
+python3.11 cannaradar_cli.py control --json --run-id latest show
+```
+
+Quarantine a bad seed for the active run:
+
+```bash
+python3.11 cannaradar_cli.py control --json --run-id latest quarantine-seed --domain bad.example --reason "malformed seed"
+```
+
+Suppress a noisy path prefix while the run is active:
+
+```bash
+python3.11 cannaradar_cli.py control --json --run-id latest suppress-prefix --domain noisy.example --prefix /blog/ --reason "404 churn"
+```
+
+Lower a domain page cap mid-run:
+
+```bash
+python3.11 cannaradar_cli.py control --json --run-id latest cap-domain --domain noisy.example --max-pages 2 --reason "agent throttle"
+```
 
 ## Exit Codes
 

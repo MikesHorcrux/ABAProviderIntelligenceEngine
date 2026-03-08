@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+from cli.control import run_control_apply, run_control_show
 from cli.doctor import run_doctor
 from cli.errors import ConfigError, ExitCode, UsageError, classify_exception
 from cli.output import emit_payload, error_payload, success_payload
@@ -93,6 +94,35 @@ def make_parser() -> argparse.ArgumentParser:
     status.add_argument("--run-id", default=None)
     status.add_argument("--checkpoint-dir", default=None)
 
+    control = sub.add_parser("control", help="Inspect or apply bounded runtime interventions for an active or resumable run.")
+    control.add_argument("--run-id", default="latest")
+    control.add_argument("--checkpoint-dir", default=None)
+    control_sub = control.add_subparsers(dest="control_action", required=True)
+
+    control_show = control_sub.add_parser("show", help="Show the current run control state.")
+
+    control_quarantine = control_sub.add_parser("quarantine-seed", help="Quarantine a seed/domain for the run.")
+    control_quarantine.add_argument("--domain", required=True)
+    control_quarantine.add_argument("--reason", default="agent_quarantine")
+
+    control_suppress = control_sub.add_parser("suppress-prefix", help="Suppress a path prefix for a domain.")
+    control_suppress.add_argument("--domain", required=True)
+    control_suppress.add_argument("--prefix", required=True)
+    control_suppress.add_argument("--reason", default="agent_suppress_prefix")
+
+    control_cap = control_sub.add_parser("cap-domain", help="Apply a lower per-domain page cap for the run.")
+    control_cap.add_argument("--domain", required=True)
+    control_cap.add_argument("--max-pages", type=int, required=True)
+    control_cap.add_argument("--reason", default="agent_cap_domain")
+
+    control_stop = control_sub.add_parser("stop-domain", help="Stop crawling a domain for the current run.")
+    control_stop.add_argument("--domain", required=True)
+    control_stop.add_argument("--reason", default="agent_stop_domain")
+
+    control_clear = control_sub.add_parser("clear-domain", help="Clear manual controls for a domain.")
+    control_clear.add_argument("--domain", required=True)
+    control_clear.add_argument("--reason", default="agent_clear_domain")
+
     sql = sub.add_parser("sql", help="Execute a read-only SELECT/WITH query against the local SQLite state.")
     sql.add_argument("query", nargs="?", default=None)
     sql.add_argument("--query", dest="query_flag", default=None)
@@ -162,6 +192,22 @@ def _dispatch(args) -> dict[str, object]:
         return execute_tail(args)
     if command == "status":
         return run_status(db_path=args.db, run_id=args.run_id, run_state_dir=args.checkpoint_dir)
+    if command == "control":
+        if args.control_action == "show":
+            return run_control_show(run_id=args.run_id, run_state_dir=args.checkpoint_dir)
+        action_value = None
+        if args.control_action == "suppress-prefix":
+            action_value = args.prefix
+        elif args.control_action == "cap-domain":
+            action_value = args.max_pages
+        return run_control_apply(
+            run_id=args.run_id,
+            run_state_dir=args.checkpoint_dir,
+            action=args.control_action,
+            domain=args.domain,
+            value=action_value,
+            reason=args.reason,
+        )
     if command == "sql":
         query = args.query_flag or args.query
         return run_sql(db_path=args.db, query=query or "", limit=args.limit)

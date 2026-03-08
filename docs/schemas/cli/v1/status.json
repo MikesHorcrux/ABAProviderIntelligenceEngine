@@ -11,11 +11,12 @@
     "message": { "type": "string" },
     "data": {
       "type": "object",
-      "required": ["db", "manifest", "checkpoint", "lock", "outputs", "recent_failures"],
+      "required": ["db", "manifest", "checkpoint", "control", "lock", "outputs", "recent_failures"],
       "properties": {
         "db": { "type": "object" },
         "manifest": { "type": "object" },
         "checkpoint": { "type": "object" },
+        "control": { "type": "object" },
         "lock": { "type": "object" },
         "outputs": { "type": "object" },
         "recent_failures": { "type": "array", "items": { "type": "object" } }

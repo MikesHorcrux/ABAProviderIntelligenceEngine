@@ -546,6 +546,7 @@ class PipelineRunner:
         max_pages_per_domain: int | None = None,
         max_total_pages: int | None = None,
         max_depth: int | None = None,
+        run_state_dir: str | Path | None = None,
     ) -> list[FetchResult]:
         seeds = seeds or self._discovery_stage()
         start = log_stage_start(self.logger, "fetch", self.job_id)
@@ -560,6 +561,7 @@ class PipelineRunner:
             max_pages_per_domain=max_pages_per_domain,
             max_total_pages=max_total_pages,
             max_depth=max_depth,
+            run_state_dir=run_state_dir,
         )
         log_stage_end(self.logger, "fetch", self.job_id, start, self.metrics.snapshot())
         con.close()

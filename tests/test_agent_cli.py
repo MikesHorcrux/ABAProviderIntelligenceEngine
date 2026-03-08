@@ -9,6 +9,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from cli.app import main as cli_main
+from pipeline.run_control import ensure_run_control
+from pipeline.run_state import create_run_state, save_run_state
 
 
 def _run_cli(argv: list[str]) -> tuple[int, dict[str, object]]:
@@ -169,6 +171,55 @@ def test_init_doctor_sql_and_search() -> None:
         assert code == 0
         assert payload["data"]["row_count"] == 1
         assert payload["data"]["rows"][0]["company_name"] == "Demo Dispensary"
+
+        state = create_run_state(
+            run_id="demo-run",
+            command="sync",
+            db_path=str(db_path),
+            config_path=str(config_path),
+            seeds_path="seeds.csv",
+            crawl_mode="growth",
+            options={"seed_limit": 1},
+        )
+        save_run_state(state, checkpoint_dir)
+        ensure_run_control("demo-run", checkpoint_dir)
+
+        code, payload = _run_cli(
+            [
+                "--json",
+                "--db",
+                str(db_path),
+                "control",
+                "--run-id",
+                "demo-run",
+                "--checkpoint-dir",
+                str(checkpoint_dir),
+                "quarantine-seed",
+                "--domain",
+                "demo.example",
+                "--reason",
+                "agent_test",
+            ]
+        )
+        assert code == 0
+        assert "demo.example" in payload["data"]["quarantined_domains"]
+
+        code, payload = _run_cli(
+            [
+                "--json",
+                "--db",
+                str(db_path),
+                "control",
+                "--run-id",
+                "demo-run",
+                "--checkpoint-dir",
+                str(checkpoint_dir),
+                "show",
+            ]
+        )
+        assert code == 0
+        assert payload["data"]["run_id"] == "demo-run"
+        assert "demo.example" in payload["data"]["quarantined_domains"]
 
 
 def test_json_usage_error_envelope() -> None:

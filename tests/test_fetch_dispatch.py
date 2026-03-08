@@ -6,6 +6,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from pipeline.config import load_crawl_config
+from pipeline.fetch_backends.crawlee_backend import SeedCrawlState
 from pipeline.fetch_backends.common import (
     SeedRunRecorder,
     detect_block_signal,
@@ -13,7 +15,7 @@ from pipeline.fetch_backends.common import (
     status_code_from_error_text,
 )
 from pipeline.fetch_backends.domain_policy import load_domain_policies
-from pipeline.observability import Metrics
+from pipeline.observability import Metrics, build_logger
 from pipeline.stages.discovery import DiscoverySeed
 
 
@@ -223,6 +225,109 @@ def test_seed_run_recorder_uses_status_hint_for_empty_blocked_seed() -> None:
     con.close()
 
 
+def test_seed_crawl_state_filters_assets_and_honors_manual_controls() -> None:
+    con = _connect()
+    metrics = Metrics("fetch-controls")
+    logger = build_logger("fetch-controls", "fetch")
+    cfg = load_crawl_config("/tmp/cannaradar-fetch-controls-does-not-exist.json")
+    seed = DiscoverySeed(name="Green Leaf", website="https://greenleaf.com", state="CA", market="CA")
+    recorder = SeedRunRecorder(
+        con=con,
+        seed=seed,
+        seed_domain="greenleaf.com",
+        job_id="job-controls",
+        metrics=metrics,
+    )
+    recorder.start()
+
+    with tempfile.TemporaryDirectory() as td:
+        state = SeedCrawlState(
+            con=con,
+            seed=seed,
+            cfg=cfg,
+            policy=load_domain_policies("/tmp/does-not-exist-fetch-policy.json").default,
+            metrics=metrics,
+            logger=logger,
+            job_id="job-controls",
+            denylist=set(),
+            recorder=recorder,
+            crawl_pages=10,
+            total_page_limit=10,
+            crawl_depth=2,
+            browser_page_limit=3,
+            run_state_dir=td,
+        )
+
+        assert state.should_accept_url("https://greenleaf.com/about", 0) is True
+        assert state.should_accept_url("https://greenleaf.com/_next/static/chunk.js", 1) is False
+
+        from cli.control import run_control_apply
+
+        run_control_apply(
+            run_id="job-controls",
+            run_state_dir=td,
+            action="suppress-prefix",
+            domain="greenleaf.com",
+            value="/about",
+            reason="agent_test",
+        )
+        assert state.should_accept_url("https://greenleaf.com/about/company", 1) is False
+    con.close()
+
+
+def test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns() -> None:
+    con = _connect()
+    metrics = Metrics("fetch-healing")
+    logger = build_logger("fetch-healing", "fetch")
+    cfg = load_crawl_config("/tmp/cannaradar-fetch-healing-does-not-exist.json")
+    seed = DiscoverySeed(name="Healing Seed", website="https://healing.example", state="CA", market="CA")
+    recorder = SeedRunRecorder(
+        con=con,
+        seed=seed,
+        seed_domain="healing.example",
+        job_id="job-healing",
+        metrics=metrics,
+    )
+    recorder.start()
+
+    with tempfile.TemporaryDirectory() as td:
+        state = SeedCrawlState(
+            con=con,
+            seed=seed,
+            cfg=cfg,
+            policy=load_domain_policies("/tmp/does-not-exist-fetch-policy.json").default,
+            metrics=metrics,
+            logger=logger,
+            job_id="job-healing",
+            denylist=set(),
+            recorder=recorder,
+            crawl_pages=10,
+            total_page_limit=10,
+            crawl_depth=2,
+            browser_page_limit=3,
+            run_state_dir=td,
+        )
+
+        for _ in range(3):
+            state.observe_failure(
+                normalized_url="https://healing.example/blog/post",
+                status_code=404,
+                error_message="missing",
+            )
+        assert "/blog/" in state.suppressed_path_prefixes
+        assert state.should_accept_url("https://healing.example/blog/next-post", 1) is False
+
+        stop_reason = state.observe_failure(
+            normalized_url="https://healing.example/",
+            status_code=0,
+            error_message="dns error: failed to lookup address information",
+        )
+        assert stop_reason == "dns_failure"
+        assert state.stop_requested is True
+        assert state.seed_quarantined is True
+    con.close()
+
+
 def main() -> None:
     test_domain_policy_loader_uses_exact_normalized_domains()
     test_block_signal_classification_covers_status_and_markers()
@@ -231,6 +336,8 @@ def main() -> None:
     test_status_code_from_error_text_parses_session_error_message()
     test_seed_run_recorder_persists_contract_rows_and_results()
     test_seed_run_recorder_uses_status_hint_for_empty_blocked_seed()
+    test_seed_crawl_state_filters_assets_and_honors_manual_controls()
+    test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns()
     print("test_fetch_dispatch: ok")
 
 

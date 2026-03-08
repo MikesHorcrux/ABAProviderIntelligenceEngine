@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import time
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -27,9 +29,16 @@ from pipeline.fetch_backends.common import (
     status_code_from_error_text,
 )
 from pipeline.fetch_backends.domain_policy import DomainPolicy, load_domain_policies
+from pipeline.run_control import (
+    append_intervention,
+    domain_runtime_record,
+    ensure_run_control,
+    load_run_control,
+    save_run_control,
+)
 from pipeline.stages.discovery import DiscoverySeed
 from pipeline.stages.parse import extract_links
-from pipeline.utils import normalize_domain, normalize_url, resolve_link, same_domain
+from pipeline.utils import normalize_domain, normalize_url, resolve_link, same_domain, utcnow_iso
 
 
 try:
@@ -39,6 +48,108 @@ except Exception:  # pragma: no cover
 
 
 _CRAWLEE_LOOP: asyncio.AbstractEventLoop | None = None
+
+AUTO_SUPPRESS_PREFIX_FAILURES = 3
+AUTO_STOP_DNS_FAILURES = 1
+AUTO_STOP_BLOCKED_FAILURES = 3
+AUTO_STOP_NOT_FOUND_FAILURES = 8
+CONTROL_REFRESH_INTERVAL_SECONDS = 0.75
+RUNTIME_PERSIST_INTERVAL_SECONDS = 1.0
+
+STATIC_PATH_PREFIXES = (
+    "/_next/",
+    "/wp-content/",
+    "/wp-includes/",
+    "/assets/",
+    "/static/",
+    "/images/",
+    "/image/",
+    "/img/",
+    "/fonts/",
+    "/css/",
+    "/js/",
+)
+LOW_VALUE_PATH_PREFIXES = (
+    "/privacy",
+    "/terms",
+    "/policy",
+    "/policies",
+    "/xmlrpc.php",
+    "/feed",
+    "/author/",
+    "/tag/",
+    "/category/",
+)
+STATIC_FILE_EXTENSIONS = {
+    ".css",
+    ".js",
+    ".mjs",
+    ".map",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".ico",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+    ".eot",
+    ".pdf",
+    ".zip",
+    ".mp4",
+    ".mp3",
+    ".webm",
+}
+
+
+def _path_lower(normalized_url: str) -> str:
+    return (urlparse(normalized_url).path or "/").lower()
+
+
+def _path_prefix(normalized_url: str) -> str:
+    path = _path_lower(normalized_url)
+    if path == "/":
+        return "/"
+    for prefix in (*STATIC_PATH_PREFIXES, *LOW_VALUE_PATH_PREFIXES):
+        normalized_prefix = prefix.rstrip("/") if prefix != "/" else prefix
+        if path == normalized_prefix or path.startswith(prefix):
+            return prefix
+    parts = [part for part in path.split("/") if part]
+    if not parts:
+        return "/"
+    first = parts[0]
+    if "." in first:
+        return f"/{first}"
+    return f"/{first}/"
+
+
+def _is_valid_seed_domain(seed: DiscoverySeed) -> tuple[bool, str]:
+    domain = normalize_domain(seed.website)
+    if not domain:
+        return False, "missing_domain"
+    if " " in domain:
+        return False, "invalid_domain_whitespace"
+    if any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789.-:" for ch in domain):
+        return False, "invalid_domain_chars"
+    if "." not in domain and not domain.startswith("localhost") and not domain.startswith("127.0.0.1"):
+        return False, "invalid_domain_format"
+    return True, domain
+
+
+def _failure_kind(status_code: int, error_message: str) -> str:
+    lowered = (error_message or "").lower()
+    if "dns error" in lowered or "lookup address" in lowered or "nodename nor servname" in lowered:
+        return "dns"
+    if status_code in {401, 403, 429, 503}:
+        return "blocked"
+    if status_code == 404:
+        return "not_found"
+    if "failed to connect" in lowered or "connecterror" in lowered or "connection" in lowered:
+        return "connect"
+    return "error"
 
 
 @dataclass
@@ -56,11 +167,36 @@ class SeedCrawlState:
     total_page_limit: int
     crawl_depth: int
     browser_page_limit: int
+    run_state_dir: str | Path | None = None
     seen_urls: set[str] = field(default_factory=set)
     queued_requests: list[QueueItem] = field(default_factory=list)
     processed_urls: set[str] = field(default_factory=set)
     browser_escalation_requested: bool = False
     browser_escalation_reason: str = ""
+    filtered_urls: int = 0
+    discovery_enabled: bool = True
+    stop_requested: bool = False
+    seed_quarantined: bool = False
+    seed_quarantine_reason: str = ""
+    manual_suppressed_path_prefixes: set[str] = field(default_factory=set)
+    auto_suppressed_path_prefixes: set[str] = field(default_factory=set)
+    failure_counts: dict[str, int] = field(default_factory=dict)
+    prefix_failure_counts: dict[str, int] = field(default_factory=dict)
+    current_error: str = ""
+    recorded_action_keys: set[str] = field(default_factory=set)
+    control_last_refreshed_at: float = 0.0
+    runtime_last_persisted_at: float = 0.0
+    base_crawl_pages: int = 0
+    base_total_page_limit: int = 0
+    base_browser_page_limit: int = 0
+
+    def __post_init__(self) -> None:
+        self.base_crawl_pages = int(self.crawl_pages)
+        self.base_total_page_limit = int(self.total_page_limit)
+        self.base_browser_page_limit = int(self.browser_page_limit)
+        ensure_run_control(self.job_id, self.run_state_dir)
+        self.refresh_controls(force=True)
+        self.persist_runtime(force=True, status="pending")
 
     @property
     def domain(self) -> str:
@@ -89,8 +225,103 @@ class SeedCrawlState:
             return False
         return self.remaining_browser_budget > 0
 
+    @property
+    def suppressed_path_prefixes(self) -> set[str]:
+        return set(self.manual_suppressed_path_prefixes) | set(self.auto_suppressed_path_prefixes)
+
+    def _control_state(self) -> dict[str, Any]:
+        return load_run_control(self.job_id, self.run_state_dir)
+
+    def persist_runtime(self, *, force: bool = False, status: str | None = None) -> None:
+        now_monotonic = time.monotonic()
+        if not force and now_monotonic - self.runtime_last_persisted_at < RUNTIME_PERSIST_INTERVAL_SECONDS:
+            return
+        state = self._control_state()
+        runtime = domain_runtime_record(state, self.domain)
+        if status:
+            runtime["status"] = status
+        runtime["processed_urls"] = len(self.processed_urls)
+        runtime["success_pages"] = int(self.recorder.run_success_pages)
+        runtime["failure_pages"] = int(self.recorder.run_failure_pages)
+        runtime["filtered_urls"] = int(self.filtered_urls)
+        runtime["last_status_code"] = int(self.recorder.last_status_code or 0)
+        runtime["last_error"] = self.current_error[:240]
+        runtime["discovery_enabled"] = bool(self.discovery_enabled)
+        runtime["browser_escalated"] = bool(self.browser_escalation_requested)
+        runtime["updated_at"] = utcnow_iso()
+        state.setdefault("runtime", {})["current_seed_domain"] = self.domain if runtime["status"] == "running" else ""
+        save_run_control(state, self.run_state_dir)
+        self.runtime_last_persisted_at = now_monotonic
+
+    def _persist_intervention(
+        self,
+        *,
+        key: str,
+        action: str,
+        reason: str,
+        source: str,
+        details: dict[str, Any] | None = None,
+    ) -> bool:
+        if key in self.recorded_action_keys:
+            return False
+        self.recorded_action_keys.add(key)
+        state = self._control_state()
+        append_intervention(
+            state,
+            domain=self.domain,
+            action=action,
+            reason=reason,
+            source=source,
+            details=details,
+        )
+        runtime = domain_runtime_record(state, self.domain)
+        runtime["last_error"] = reason
+        runtime["updated_at"] = utcnow_iso()
+        save_run_control(state, self.run_state_dir)
+        self.logger.warning(
+            "fetch_intervention",
+            extra={
+                "job_id": self.job_id,
+                "stage": "fetch",
+                "domain": self.domain,
+                "action": action,
+                "reason": reason,
+                "details": details or {},
+            },
+        )
+        self.runtime_last_persisted_at = 0.0
+        return True
+
+    def refresh_controls(self, *, force: bool = False) -> None:
+        now_monotonic = time.monotonic()
+        if not force and now_monotonic - self.control_last_refreshed_at < CONTROL_REFRESH_INTERVAL_SECONDS:
+            return
+
+        state = self._control_state()
+        control = dict((((state.get("agent_controls") or {}).get("domains") or {}).get(self.domain)) or {})
+        self.manual_suppressed_path_prefixes = {
+            str(item).strip().lower()
+            for item in control.get("suppressed_path_prefixes", [])
+            if str(item).strip()
+        }
+        self.seed_quarantined = bool(control.get("quarantined"))
+        self.seed_quarantine_reason = str(control.get("quarantine_reason") or "")
+        self.stop_requested = bool(control.get("stop_requested")) or self.seed_quarantined
+        override = control.get("max_pages_per_domain")
+        if override not in (None, ""):
+            max_pages = max(1, int(override))
+            self.crawl_pages = min(self.base_crawl_pages, max_pages)
+            self.total_page_limit = min(self.base_total_page_limit, max_pages)
+            self.browser_page_limit = min(self.base_browser_page_limit, max_pages)
+        else:
+            self.crawl_pages = self.base_crawl_pages
+            self.total_page_limit = self.base_total_page_limit
+            self.browser_page_limit = self.base_browser_page_limit
+        self.control_last_refreshed_at = now_monotonic
+
     def mark_processed(self, normalized_url: str) -> None:
         self.processed_urls.add(normalized_url)
+        self.persist_runtime()
 
     def request_browser_escalation(self, reason: str) -> None:
         if self.browser_escalation_requested or not self.can_escalate_to_browser():
@@ -98,8 +329,128 @@ class SeedCrawlState:
         self.browser_escalation_requested = True
         self.browser_escalation_reason = reason
         self.metrics.inc("browser_escalations")
+        self._persist_intervention(
+            key=f"browser:{reason}",
+            action="browser_escalation",
+            reason=reason,
+            source="auto",
+            details={"remaining_browser_budget": self.remaining_browser_budget},
+        )
+        self.persist_runtime(force=True)
 
-    def should_accept_url(self, normalized_url: str) -> bool:
+    def _rejection_reason(self, normalized_url: str) -> str:
+        path = _path_lower(normalized_url)
+        for prefix in self.suppressed_path_prefixes:
+            if path == prefix.rstrip("/") or path.startswith(prefix):
+                return "suppressed_prefix"
+        if any(path.startswith(prefix) for prefix in STATIC_PATH_PREFIXES):
+            return "static_path"
+        for prefix in LOW_VALUE_PATH_PREFIXES:
+            normalized_prefix = prefix.rstrip("/") if prefix != "/" else prefix
+            if path == normalized_prefix or path.startswith(prefix):
+                return "low_value_path"
+        if any(path.endswith(ext) for ext in STATIC_FILE_EXTENSIONS):
+            return "static_extension"
+        return ""
+
+    def observe_success(self) -> None:
+        self.current_error = ""
+        self.persist_runtime()
+
+    def observe_failure(self, *, normalized_url: str, status_code: int, error_message: str) -> str | None:
+        failure_kind = _failure_kind(status_code, error_message)
+        self.failure_counts[failure_kind] = int(self.failure_counts.get(failure_kind, 0)) + 1
+        self.current_error = (error_message or failure_kind)[:240]
+        prefix = _path_prefix(normalized_url)
+        if prefix != "/":
+            self.prefix_failure_counts[prefix] = int(self.prefix_failure_counts.get(prefix, 0)) + 1
+            if (
+                self.prefix_failure_counts[prefix] >= AUTO_SUPPRESS_PREFIX_FAILURES
+                and prefix not in self.suppressed_path_prefixes
+            ):
+                state = self._control_state()
+                domains = state.setdefault("agent_controls", {}).setdefault("domains", {})
+                record = dict(domains.get(self.domain) or {})
+                prefixes = {
+                    str(item).strip().lower()
+                    for item in record.get("suppressed_path_prefixes", [])
+                    if str(item).strip()
+                }
+                prefixes.add(prefix)
+                record["suppressed_path_prefixes"] = sorted(prefixes)
+                record["updated_at"] = utcnow_iso()
+                domains[self.domain] = record
+                append_intervention(
+                    state,
+                    domain=self.domain,
+                    action="auto_suppress_prefix",
+                    reason=f"{failure_kind}_storm",
+                    source="auto",
+                    details={"prefix": prefix, "failures": self.prefix_failure_counts[prefix]},
+                )
+                save_run_control(state, self.run_state_dir)
+                self.manual_suppressed_path_prefixes = prefixes
+                self.recorded_action_keys.add(f"prefix:{prefix}")
+                self.logger.warning(
+                    "fetch_intervention",
+                    extra={
+                        "job_id": self.job_id,
+                        "stage": "fetch",
+                        "domain": self.domain,
+                        "action": "auto_suppress_prefix",
+                        "reason": f"{failure_kind}_storm",
+                        "details": {"prefix": prefix, "failures": self.prefix_failure_counts[prefix]},
+                    },
+                )
+
+        if failure_kind == "dns" and self.failure_counts[failure_kind] >= AUTO_STOP_DNS_FAILURES:
+            self.seed_quarantined = True
+            self.seed_quarantine_reason = "dns_failure"
+            self.stop_requested = True
+            self.discovery_enabled = False
+            self._persist_intervention(
+                key="stop:dns",
+                action="auto_quarantine_seed",
+                reason="dns_failure",
+                source="auto",
+                details={"error": error_message[:200]},
+            )
+            self.persist_runtime(force=True)
+            return "dns_failure"
+
+        if failure_kind == "blocked" and self.failure_counts[failure_kind] >= AUTO_STOP_BLOCKED_FAILURES:
+            self.stop_requested = True
+            self.discovery_enabled = False
+            self._persist_intervention(
+                key="stop:blocked",
+                action="auto_stop_domain",
+                reason="blocked_storm",
+                source="auto",
+                details={"blocked_failures": self.failure_counts[failure_kind]},
+            )
+            self.persist_runtime(force=True)
+            return "blocked_storm"
+
+        if failure_kind == "not_found" and self.failure_counts[failure_kind] >= AUTO_STOP_NOT_FOUND_FAILURES:
+            self.discovery_enabled = False
+            self.stop_requested = self.recorder.run_success_pages == 0
+            self._persist_intervention(
+                key="stop:not_found",
+                action="auto_disable_discovery",
+                reason="not_found_storm",
+                source="auto",
+                details={"not_found_failures": self.failure_counts[failure_kind]},
+            )
+            self.persist_runtime(force=True)
+            return "not_found_storm" if self.stop_requested else None
+
+        self.persist_runtime()
+        return None
+
+    def should_accept_url(self, normalized_url: str, depth: int) -> bool:
+        self.refresh_controls(force=True)
+        if self.stop_requested or self.seed_quarantined:
+            return False
         parsed = urlparse(normalized_url)
         if parsed.scheme.lower() not in self.allowed_schemes:
             return False
@@ -107,6 +458,18 @@ class SeedCrawlState:
         if not domain or domain in self.denylist:
             return False
         if not same_domain(self.seed.website, normalized_url):
+            return False
+        if depth > 0 and not self.discovery_enabled:
+            self.filtered_urls += 1
+            self.metrics.inc("pages_filtered")
+            self.persist_runtime()
+            return False
+        rejection_reason = self._rejection_reason(normalized_url)
+        if rejection_reason:
+            self.filtered_urls += 1
+            self.metrics.inc("pages_filtered")
+            self.metrics.inc(f"pages_filtered_{rejection_reason}")
+            self.persist_runtime()
             return False
         return True
 
@@ -116,7 +479,7 @@ class SeedCrawlState:
             return None
         self.seen_urls.add(normalized)
 
-        if not self.should_accept_url(normalized):
+        if not self.should_accept_url(normalized, depth):
             return None
         if len(self.seen_urls) > self.crawl_pages * 2:
             return None
@@ -129,6 +492,10 @@ class SeedCrawlState:
         return item
 
     def seed_initial_requests(self) -> list[QueueItem]:
+        self.refresh_controls(force=True)
+        if self.seed_quarantined or self.stop_requested:
+            self.persist_runtime(force=True, status="quarantined" if self.seed_quarantined else "stopped")
+            return []
         items: list[QueueItem] = []
         seed_url = self.queue_url(self.seed.website, 0)
         if seed_url is not None:
@@ -141,7 +508,7 @@ class SeedCrawlState:
         return items
 
     def enqueue_links_from_html(self, base_url: str, html: str, depth: int) -> list[QueueItem]:
-        if depth >= self.crawl_depth:
+        if depth >= self.crawl_depth or not self.discovery_enabled or self.stop_requested:
             return []
         queued: list[QueueItem] = []
         for link in extract_links(base_url, html):
@@ -290,6 +657,7 @@ async def _run_http_crawl(state: SeedCrawlState, initial_requests: list[QueueIte
     if not initial_requests or state.remaining_total_budget <= 0:
         return
 
+    state.persist_runtime(force=True, status="running")
     request_queue = await RequestQueue.open(name=_storage_name("cannaradar-http", state.recorder.job_pk))
     crawler = HttpCrawler(
         request_manager=request_queue,
@@ -318,6 +686,7 @@ async def _run_http_crawl(state: SeedCrawlState, initial_requests: list[QueueIte
 
     @crawler.failed_request_handler
     async def failed_request_handler(context, error: Exception) -> None:
+        state.refresh_controls(force=True)
         requested_url = str(context.request.user_data.get("requested_url") or context.request.url)
         normalized_url = normalize_url(context.request.url)
         content_type = None
@@ -350,13 +719,30 @@ async def _run_http_crawl(state: SeedCrawlState, initial_requests: list[QueueIte
             emit_result=False,
             count_as_success=False,
         )
+        stop_reason = state.observe_failure(
+            normalized_url=normalized_url,
+            status_code=status_code,
+            error_message=str(error),
+        )
 
         if block_signal.triggered and state.can_escalate_to_browser():
+            state.observe_failure(
+                normalized_url=normalized_url,
+                status_code=status_code,
+                error_message=block_signal.reason,
+            )
             state.request_browser_escalation(block_signal.reason)
             crawler.stop(f"http blocked: {block_signal.reason}")
+            return
+        if state.stop_requested or stop_reason:
+            crawler.stop(stop_reason or "domain_stop_requested")
 
     @crawler.router.default_handler
     async def request_handler(context) -> None:
+        state.refresh_controls(force=True)
+        if state.stop_requested or state.seed_quarantined:
+            crawler.stop(state.seed_quarantine_reason or "domain_stop_requested")
+            return
         requested_url = str(context.request.user_data.get("requested_url") or context.request.url)
         normalized_url = normalize_url(context.request.url)
         status_code = int(context.http_response.status_code)
@@ -384,6 +770,17 @@ async def _run_http_crawl(state: SeedCrawlState, initial_requests: list[QueueIte
             crawler.stop(f"http blocked: {block_signal.reason}")
             return
 
+        if result is None:
+            stop_reason = state.observe_failure(
+                normalized_url=normalized_url,
+                status_code=status_code,
+                error_message="blocked_or_non_html",
+            )
+            if state.stop_requested or stop_reason:
+                crawler.stop(stop_reason or "domain_stop_requested")
+            return
+
+        state.observe_success()
         if result is None or state.remaining_total_budget <= 0:
             return
 
@@ -402,6 +799,7 @@ async def _run_browser_crawl(state: SeedCrawlState, initial_requests: list[Queue
     if not initial_requests or browser_budget <= 0:
         return
 
+    state.persist_runtime(force=True, status="running")
     request_queue = await RequestQueue.open(name=_storage_name("cannaradar-browser", state.recorder.job_pk))
     crawler = PlaywrightCrawler(
         request_manager=request_queue,
@@ -444,6 +842,7 @@ async def _run_browser_crawl(state: SeedCrawlState, initial_requests: list[Queue
 
     @crawler.failed_request_handler
     async def failed_request_handler(context, error: Exception) -> None:
+        state.refresh_controls(force=True)
         requested_url = str(context.request.user_data.get("requested_url") or context.request.url)
         normalized_url = normalize_url(context.request.url)
         status_code = first_positive_status_code(
@@ -463,9 +862,20 @@ async def _run_browser_crawl(state: SeedCrawlState, initial_requests: list[Queue
             count_as_success=False,
             used_browser=True,
         )
+        stop_reason = state.observe_failure(
+            normalized_url=normalized_url,
+            status_code=status_code,
+            error_message=str(error),
+        )
+        if state.stop_requested or stop_reason:
+            crawler.stop(stop_reason or "domain_stop_requested")
 
     @crawler.router.default_handler
     async def request_handler(context) -> None:
+        state.refresh_controls(force=True)
+        if state.stop_requested or state.seed_quarantined:
+            crawler.stop(state.seed_quarantine_reason or "domain_stop_requested")
+            return
         requested_url = str(context.request.user_data.get("requested_url") or context.request.url)
         normalized_url = normalize_url(context.request.url)
 
@@ -510,6 +920,17 @@ async def _run_browser_crawl(state: SeedCrawlState, initial_requests: list[Queue
             used_browser=True,
         )
 
+        if result is None:
+            stop_reason = state.observe_failure(
+                normalized_url=normalized_url,
+                status_code=status_code,
+                error_message="browser_non_html_or_blocked",
+            )
+            if state.stop_requested or stop_reason:
+                crawler.stop(stop_reason or "domain_stop_requested")
+            return
+
+        state.observe_success()
         if result is None or state.remaining_total_budget <= 0:
             return
 
@@ -549,15 +970,40 @@ def run_fetch(
     max_pages_per_domain: int | None = None,
     max_total_pages: int | None = None,
     max_depth: int | None = None,
+    run_state_dir: str | Path | None = None,
 ) -> list[FetchResult]:
     denylist = {d for d in cfg.merged_denylist() if d}
     policy_set = load_domain_policies(cfg.resolved_crawlee_domain_policies_path())
+    ensure_run_control(job_id, run_state_dir)
     discovered: list[FetchResult] = []
 
     for seed in seeds:
-        seed_domain = normalize_domain(seed.website)
-        if not seed_domain:
+        valid_seed, seed_domain_or_reason = _is_valid_seed_domain(seed)
+        if not valid_seed:
+            invalid_identity = seed_domain_or_reason if "." in seed_domain_or_reason else normalize_url(seed.website)
+            state = load_run_control(job_id, run_state_dir)
+            append_intervention(
+                state,
+                domain=invalid_identity,
+                action="auto_quarantine_seed",
+                reason=f"invalid_seed:{seed_domain_or_reason}",
+                source="auto",
+                details={"seed_name": seed.name, "website": seed.website},
+            )
+            save_run_control(state, run_state_dir)
+            logger.warning(
+                "Skipping invalid seed",
+                extra={
+                    "job_id": job_id,
+                    "stage": "fetch",
+                    "seed_name": seed.name,
+                    "website": seed.website,
+                    "reason": seed_domain_or_reason,
+                },
+            )
+            metrics.inc("seeds_quarantined")
             continue
+        seed_domain = seed_domain_or_reason
         if seed_domain in denylist:
             logger.warning(
                 "Skipping denylisted domain",
@@ -599,6 +1045,7 @@ def run_fetch(
             total_page_limit=total_limit,
             crawl_depth=crawl_depth_limit,
             browser_page_limit=browser_limit,
+            run_state_dir=run_state_dir,
         )
         initial_requests = state.seed_initial_requests()
 
@@ -606,6 +1053,8 @@ def run_fetch(
             _run_crawlee(_run_seed_fetch_async(state=state, initial_requests=initial_requests))
 
         recorder.finalize()
+        final_status = "completed" if recorder.has_success else ("quarantined" if state.seed_quarantined else ("stopped" if state.stop_requested else ("partial" if recorder.run_pages_fetched else "empty")))
+        state.persist_runtime(force=True, status=final_status)
         discovered.extend(recorder.results)
 
     con.commit()

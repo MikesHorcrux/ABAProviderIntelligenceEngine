@@ -11,6 +11,7 @@ from cli.doctor import run_init
 from pipeline.db import connect_db
 from pipeline.observability import Metrics, build_logger
 from pipeline.pipeline import DB_PATH, SCHEMA_PATH, PipelineRunner
+from pipeline.run_control import ensure_run_control, update_runtime_controls
 from pipeline.run_state import (
     create_run_state,
     deserialize_seeds,
@@ -227,6 +228,7 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
         )
         save_run_state(state, checkpoint_dir)
 
+    ensure_run_control(run_id, checkpoint_dir)
     runner = _build_runner(run_id, db_path=db_path, seeds_path=seeds_path, args=args, runner_factory=runner_factory)
     state["db_path"] = db_path
     state["seeds_path"] = seeds_path
@@ -300,6 +302,11 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             state["report"] = report
             mark_run_completed(state, summary={"run_id": run_id, "discovered": 0}, report=report)
             save_run_state(state, checkpoint_dir)
+            update_runtime_controls(
+                run_id,
+                lambda payload: payload.update({"status": "completed"}),
+                base_dir=checkpoint_dir,
+            )
             runner._write_last_run_manifest(report)
             runner._write_daily_growth_summary(report)
             return {
@@ -321,6 +328,7 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
                         max_pages_per_domain=options.get("growth_max_pages") or (runner.config.growth_max_pages_per_domain or None),
                         max_total_pages=options.get("growth_max_total") or (runner.config.growth_max_total_pages or None),
                         max_depth=options.get("growth_max_depth") or (runner.config.growth_max_depth or None),
+                        run_state_dir=checkpoint_dir,
                     )
                 )
             if monitoring_seeds:
@@ -330,6 +338,7 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
                         max_pages_per_domain=options.get("monitor_max_pages") or runner.config.monitor_max_pages_per_domain,
                         max_total_pages=options.get("monitor_max_total") or runner.config.monitor_max_total_pages,
                         max_depth=options.get("monitor_max_depth") or runner.config.monitor_max_depth,
+                        run_state_dir=checkpoint_dir,
                     )
                 )
             mark_stage_completed(
@@ -479,6 +488,11 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
         )
         mark_run_completed(state, summary=summary, report=report)
         checkpoint_path = save_run_state(state, checkpoint_dir)
+        update_runtime_controls(
+            run_id,
+            lambda payload: payload.update({"status": "completed"}),
+            base_dir=checkpoint_dir,
+        )
         return {
             "run_id": run_id,
             "checkpoint_path": str(checkpoint_path),
@@ -497,6 +511,11 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
                 message=cli_message,
             )
         save_run_state(state, checkpoint_dir)
+        update_runtime_controls(
+            run_id,
+            lambda payload: payload.update({"status": "failed"}),
+            base_dir=checkpoint_dir,
+        )
         raise
 
 

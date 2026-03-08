@@ -1,104 +1,73 @@
 # AI Agent Reference: CannaRadar v1.5
 
-This document describes how an AI agent should modify and reason about the system.
+Use this document when proposing code changes or operating live runs.
 
-## Scope
+## Primary Contract
 
-Use this when proposing code changes.
+The canonical agent surface is the CLI plus run-state files:
 
-Focus areas:
+- `cannaradar_cli.py init`
+- `cannaradar_cli.py doctor`
+- `cannaradar_cli.py sync`
+- `cannaradar_cli.py tail`
+- `cannaradar_cli.py status`
+- `cannaradar_cli.py search`
+- `cannaradar_cli.py sql`
+- `cannaradar_cli.py export`
 
-- Parser and extraction behavior (`pipeline/stages/parse.py`)
-- Fetch behavior and politeness (`pipeline/stages/fetch.py`, `pipeline/config.py`)
-- Resolution logic (`pipeline/stages/resolve.py`)
-- Scoring model and features (`pipeline/stages/score.py`)
-- Enrichment steps (`pipeline/stages/enrich.py`)
-- Export contracts (`pipeline/stages/export.py`, `jobs/export_changes.py`)
+Prefer `--json` for agent workflows.
 
-## Safe edit principles
+Read these first:
 
-- One stage per patch whenever possible.
-- Keep SQL migrations additive if possible.
-- Preserve existing output column contracts unless a migration is included.
+- `/Users/horcrux/Development/CannaRadar/docs/AGENT_OPS_PLAYBOOK.md`
+- `/Users/horcrux/Development/CannaRadar/docs/RUNBOOK_V1.md`
+- `/Users/horcrux/Development/CannaRadar/SKILL.md`
+
+## Focus Areas
+
+- CLI and checkpoint behavior: `cli/`, `pipeline/run_state.py`
+- Fetch/runtime behavior: `pipeline/fetch_backends/`, `pipeline/config.py`
+- Parse: `pipeline/stages/parse.py`
+- Resolve: `pipeline/stages/resolve.py`
+- Score: `pipeline/stages/score.py`
+- Export contracts: `pipeline/stages/export.py`, `jobs/export_changes.py`
+
+## Safe Edit Principles
+
+- One stage per patch when possible.
+- Keep SQL migrations additive when possible.
+- Preserve existing output column contracts unless a migration/version change is included.
 - Add tests for changed behavior in `tests/`.
-- Preserve soft-delete patterns and `deleted_at=''` semantics unless schema-wide change is intentional.
+- Preserve `deleted_at=''` soft-delete semantics unless a schema-wide change is intentional.
 
-## Required reasoning before edits
+## Live-Run Operating Rules
 
-- Identify the contract that changes (input schema, output schema, score semantics, crawl policy).
-- Confirm whether any output file contract changes (`out/*` column names or run-id format).
-- Verify how the change affects manifest/change-report schema and `run_v4.sh`.
+- Start uncertain environments with `init` and `doctor`.
+- Prefer bounded live runs before full inventory runs.
+- Use `status --json` and checkpoint files to diagnose progress instead of relying on terminal noise.
+- Resume interrupted runs with `sync --resume latest` when the checkpoint is still valid.
+- Treat repeated asset/static/blog churn in fetch as URL-filter debt, not as proof the pipeline is healthy.
+- Treat malformed seed domains as seed-quality issues first.
 
-## Stage-specific editing notes
+## Fetch Notes
 
-### Fetching and crawling
+- Do not change robot or denylist behavior without documenting the operational/legal scope.
+- Keep per-domain delay, backoff, and cache semantics explicit.
+- Use `seed_telemetry` to reason about blocked, failed, and cooling-off domains.
 
-- Do not modify robot or denylist behavior without documenting legal scope.
-- If adding concurrency, validate DB write path for lock contention.
-- Keep per-domain delay and cache semantics explicit in `pipeline/stages/fetch.py`.
+## Testing Expectations
 
-### Parsing
+Baseline validation:
 
-- Keep extraction regexes minimal and anchored to avoid false positives.
-- Maintain role extraction in a way that does not inject non-business PII.
-- Add/extend tests in `tests/test_parse_stage.py` for each regex class changed.
+- `PYTHONPATH=$PWD python3.11 tests/test_agent_cli.py`
+- `PYTHONPATH=$PWD python3.11 tests/test_run_state.py`
+- `PYTHONPATH=$PWD python3.11 tests/test_fetch_config.py`
+- `PYTHONPATH=$PWD python3.11 tests/test_fetch_dispatch.py`
+- `PYTHONPATH=$PWD python3.11 tests/test_parse_stage.py`
+- `PYTHONPATH=$PWD python3.11 tests/test_resolve_stage.py`
 
-### Resolution
+When fetch/runtime behavior changes:
 
-- `resolve_and_upsert_locations` must stay deterministic for identical seeds/pages.
-- Merge suggestions should only mark probable collisions and should not auto-merge automatically.
-- Keep confidence semantics explicit in `entity_resolutions.reason`.
+- `CANNARADAR_RUN_FETCH_INTEGRATION=1 PYTHONPATH=$PWD python3.11 tests/test_fetch_integration.py`
 
-### Scoring
-
-- Keep score ranges within [0,100].
-- Update `FEATURE_KEYS` together with any new feature.
-- Ensure new features are inserted into `scoring_features` and covered by quality expectations.
-
-### Exports
-
-- Never weaken segment purity for `outreach_dispensary_100.csv`.
-- Keep `outreach_ready_<timestamp>.csv` column contract stable.
-- For change-report keys, keep the single timestamp format only: `YYYYMMDD-HHMMSS`.
-
-### Migrations
-
-- Any schema change requires:
-  - `db/schema.sql` update
-  - `jobs/ingest_sources.py` checks alignment if required columns/indexes changed
-  - smoke test expectations update if needed
-- Do not weaken migration checks without explicit product approval.
-
-## Testing expectations
-
-When changes touch parsing:
-
-- add/extend `tests/test_parse_stage.py`
-
-When changes touch resolution:
-
-- add/extend `tests/test_resolve_stage.py`
-
-For broader stability:
-
-- run `./run_smoke_tests.sh` after validation in a clean environment.
-
-## How to reason about outcomes
-
-All lead quality comes from evidence:
-
-- parse/parse-derived facts with source URL
-- enrichment inferences with low confidence and explicit evidence note
-- scoring features with per-feature persistence
-
-If there is no evidence row for a critical claim, classify it as inference and keep confidence low.
-
-## Rollback habits
-
-Before major edits, record in commit message:
-
-- behavior changed
-- why changed
-- fallback plan if score/segment behavior regresses
-
-Use existing rollback playbook in `docs/RUNBOOK_V1.md` for DB-related incidents.
+Run `./run_smoke_tests.sh` only when the workspace has the generated artifact set required by `tests/smoke_v1.py`.

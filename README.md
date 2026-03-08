@@ -68,6 +68,7 @@ flowchart TD
 - `python3.11 cannaradar_cli.py sync --json --seeds seeds.csv --max 200`
 - `python3.11 cannaradar_cli.py tail --json --crawl-mode monitor --interval-seconds 300`
 - `python3.11 cannaradar_cli.py status --json`
+- `python3.11 cannaradar_cli.py control --json --run-id latest show`
 - `python3.11 cannaradar_cli.py search --json --preset failed-domains`
 - `python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"`
 - `python3.11 cannaradar_cli.py export --json --kind all`
