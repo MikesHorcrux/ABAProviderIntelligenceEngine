@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaradar.local/schemas/cli/v1/sql.json",
+  "title": "CannaRadar sql output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "cli.v1" },
+    "command": { "const": "sql" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["query", "row_count", "limit", "columns", "rows"],
+      "properties": {
+        "query": { "type": "string" },
+        "row_count": { "type": "integer" },
+        "limit": { "type": "integer" },
+        "columns": { "type": "array", "items": { "type": "string" } },
+        "rows": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

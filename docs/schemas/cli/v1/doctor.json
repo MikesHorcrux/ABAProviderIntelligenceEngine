@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaradar.local/schemas/cli/v1/doctor.json",
+  "title": "CannaRadar doctor output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "cli.v1" },
+    "command": { "const": "doctor" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["ok", "checks", "summary"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "status", "summary", "details", "remediation"],
+            "properties": {
+              "id": { "type": "string" },
+              "status": { "enum": ["pass", "fail", "warn", "skip"] },
+              "summary": { "type": "string" },
+              "details": { "type": "object" },
+              "remediation": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "summary": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

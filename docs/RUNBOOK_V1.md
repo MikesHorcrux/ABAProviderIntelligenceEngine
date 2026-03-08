@@ -26,6 +26,35 @@ This runbook is the operator source of truth for running, validating, and recove
 - `CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN`: per-domain Playwright cap.
 - `CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE`: alternate domain policy file path.
 
+## Agent-ops workflow
+
+Canonical command flow:
+
+```bash
+python3.11 cannaradar_cli.py init --json
+python3.11 cannaradar_cli.py doctor --json
+python3.11 cannaradar_cli.py sync --json --crawl-mode growth --max 50
+python3.11 cannaradar_cli.py status --json
+python3.11 cannaradar_cli.py export --json --kind all
+```
+
+Resume after interruption:
+
+```bash
+python3.11 cannaradar_cli.py status --json
+python3.11 cannaradar_cli.py sync --json --resume latest
+```
+
+Agent diagnostics:
+
+```bash
+python3.11 cannaradar_cli.py search --json --preset failed-domains
+python3.11 cannaradar_cli.py search --json --preset blocked-domains
+python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"
+```
+
+Checkpoint state is written to `data/state/agent_runs/` by default, or to `--checkpoint-dir` when specified.
+
 ## Run modes
 
 ### Full run (recommended)
@@ -43,7 +72,15 @@ What it performs:
 - run manifest write
 - segment guardrail check
 
-### Stage-only runs
+### Canonical batch run
+
+```bash
+python3.11 cannaradar_cli.py sync --json --seeds seeds.csv
+python3.11 cannaradar_cli.py status --json
+python3.11 cannaradar_cli.py export --json --kind all
+```
+
+### Stage and legacy compatibility runs
 
 ```bash
 python3.11 cannaradar_cli.py crawl:run --seeds seeds.csv
@@ -109,6 +146,7 @@ Outputs:
 
 ## Pre-flight checks
 
+- Run `python3.11 cannaradar_cli.py doctor --json` and confirm `ok: true` before long crawl runs.
 - Ensure seed file exists and has `name,website,state,market` header.
 - Verify `CANNARADAR_DENYLIST` does not include required domains.
 - Confirm robots access by checking fetch logs for blocked URLs.
@@ -143,6 +181,12 @@ If bootstrap fails:
 
 ## Recovery playbook
 
+### Interrupted agent run
+
+- Inspect the latest checkpoint with `python3.11 cannaradar_cli.py status --json`.
+- Resume with `python3.11 cannaradar_cli.py sync --json --resume latest`.
+- If a checkpoint is corrupt or stale, point to a different directory with `--checkpoint-dir` and re-run `init` + `doctor`.
+
 ### No crawl output
 
 - Re-run with smaller max page settings.
@@ -175,6 +219,21 @@ For deterministic changes:
 - update relevant tests under `tests/`
 - record rationale in commit message
 - mention rollback steps in runbook if behavior changes externally visible
+
+## Exit code reference
+
+- `0`: success
+- `2`: usage error
+- `10`: config error
+- `11`: auth error
+- `12`: network error
+- `13`: data validation error
+- `14`: storage error
+- `15`: resume state error
+- `16`: runtime error
+- `17`: command failed
+
+Schema and command-contract details live in `docs/AGENT_OPS_PLAYBOOK.md` and `docs/schemas/cli/v1/`.
 
 ## Acceptance check (manual)
 

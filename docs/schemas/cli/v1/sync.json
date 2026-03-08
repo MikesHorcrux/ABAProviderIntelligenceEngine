@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaradar.local/schemas/cli/v1/sync.json",
+  "title": "CannaRadar sync output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "cli.v1" },
+    "command": { "const": "sync" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["run_id", "checkpoint_path", "recovery_pointer", "summary", "report"],
+      "properties": {
+        "run_id": { "type": "string" },
+        "checkpoint_path": { "type": "string" },
+        "recovery_pointer": { "type": "string" },
+        "summary": { "type": "object" },
+        "report": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

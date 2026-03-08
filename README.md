@@ -33,11 +33,12 @@ flowchart TD
 ## Repository map
 
 - `pipeline/`: stage modules and orchestration.
-- `pipeline/config.py`: runtime config load and env overrides.
+  - `pipeline/config.py`: runtime config load and env overrides.
   - `pipeline/db.py`: SQLite connection helpers.
   - `pipeline/fetch_backends/`: Crawlee fetch backend, shared persistence helpers, and domain policy loading.
   - `pipeline/observability.py`: JSON logs and metrics counters.
   - `pipeline/pipeline.py`: orchestrator entrypoint methods.
+  - `pipeline/run_state.py`: resumable agent-run checkpoints and stage markers.
   - `pipeline/quality.py`: quality report generation.
   - `pipeline/stages/discovery.py`: seed parsing and dedupe.
   - `pipeline/stages/fetch.py`: public fetch entrypoint backed by Crawlee HTTP crawl + Playwright escalation.
@@ -46,6 +47,7 @@ flowchart TD
   - `pipeline/stages/enrich.py`: enrichment steps.
   - `pipeline/stages/score.py`: feature scoring.
   - `pipeline/stages/export.py`: deterministic CSV/report outputs.
+- `cli/`: canonical agent-ops command implementations, output envelopes, diagnostics, and resume logic.
 - `jobs/`
   - `jobs/ingest_sources.py`: schema/migration bootstrap + hard checks.
   - `jobs/export_changes.py`: snapshot diffing and change tracking.
@@ -59,13 +61,21 @@ flowchart TD
 
 ## Command surface
 
-### Daily execution
+### Canonical agent-ops commands
 
-- `python3.11 cannaradar_cli.py crawl:run --seeds seeds.csv --max 200`
+- `python3.11 cannaradar_cli.py init --json`
+- `python3.11 cannaradar_cli.py doctor --json`
+- `python3.11 cannaradar_cli.py sync --json --seeds seeds.csv --max 200`
+- `python3.11 cannaradar_cli.py tail --json --crawl-mode monitor --interval-seconds 300`
+- `python3.11 cannaradar_cli.py status --json`
+- `python3.11 cannaradar_cli.py search --json --preset failed-domains`
+- `python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"`
+- `python3.11 cannaradar_cli.py export --json --kind all`
 - `./run_v4.sh`
 
-### Stage-level execution
+### Legacy compatibility aliases
 
+- `python3.11 cannaradar_cli.py crawl:run --seeds seeds.csv --max 200`
 - `python3.11 cannaradar_cli.py enrich:run --since "<ISO_TIMESTAMP>"`
 - `python3.11 cannaradar_cli.py score:run`
 - `python3.11 cannaradar_cli.py export:outreach --tier A --limit 200`
@@ -78,6 +88,23 @@ flowchart TD
 - `python3.11 jobs/export_changes.py --run-id <YYYYMMDD-HHMMSS>`
 - `python3.11 jobs/log_outreach_event.py --website <domain> --channel email --outcome replied --notes "<text>"`
 - `./run_smoke_tests.sh`
+
+## Agent-operable workflow
+
+Canonical automation loop:
+
+1. `python3.11 cannaradar_cli.py init --json`
+2. `python3.11 cannaradar_cli.py doctor --json`
+3. `python3.11 cannaradar_cli.py sync --json --crawl-mode growth --max 50`
+4. `python3.11 cannaradar_cli.py status --json`
+5. `python3.11 cannaradar_cli.py export --json --kind all`
+
+Resume loop after interruption:
+
+1. `python3.11 cannaradar_cli.py status --json`
+2. `python3.11 cannaradar_cli.py sync --json --resume latest`
+
+The canonical commands emit a stable `cli.v1` JSON envelope when `--json` is used. Schema docs live under `docs/schemas/cli/v1/`, and the operator flow is documented in `docs/AGENT_OPS_PLAYBOOK.md`.
 
 ## Output matrix
 
@@ -155,7 +182,10 @@ python -m pip install -r requirements.txt
 playwright install chromium
 
 PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py
-python3.11 cannaradar_cli.py crawl:run --seeds seeds.csv
+python3.11 cannaradar_cli.py init --json
+python3.11 cannaradar_cli.py doctor --json
+python3.11 cannaradar_cli.py sync --json --seeds seeds.csv
+python3.11 cannaradar_cli.py status --json
 ```
 
 ## AI-agent operating instructions

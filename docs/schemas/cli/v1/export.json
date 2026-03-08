@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaradar.local/schemas/cli/v1/export.json",
+  "title": "CannaRadar export output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "cli.v1" },
+    "command": { "const": "export" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

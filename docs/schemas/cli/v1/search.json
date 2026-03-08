@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaradar.local/schemas/cli/v1/search.json",
+  "title": "CannaRadar search output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "cli.v1" },
+    "command": { "const": "search" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["row_count", "rows"],
+      "properties": {
+        "query": { "type": "string" },
+        "preset": { "type": "string" },
+        "row_count": { "type": "integer" },
+        "rows": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

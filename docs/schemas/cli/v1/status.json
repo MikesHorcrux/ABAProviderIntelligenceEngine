@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaradar.local/schemas/cli/v1/status.json",
+  "title": "CannaRadar status output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "cli.v1" },
+    "command": { "const": "status" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["db", "manifest", "checkpoint", "lock", "outputs", "recent_failures"],
+      "properties": {
+        "db": { "type": "object" },
+        "manifest": { "type": "object" },
+        "checkpoint": { "type": "object" },
+        "lock": { "type": "object" },
+        "outputs": { "type": "object" },
+        "recent_failures": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -7,6 +7,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+_BASE_LOG_RECORD = logging.makeLogRecord({})
+_STANDARD_LOG_RECORD_KEYS = set(_BASE_LOG_RECORD.__dict__.keys())
+
 
 @dataclass
 class Metrics:
@@ -30,9 +33,15 @@ class JsonFormatter(logging.Formatter):
             "stage": getattr(record, "stage", None),
             "message": record.getMessage(),
         }
+        for key, value in record.__dict__.items():
+            if key in _STANDARD_LOG_RECORD_KEYS:
+                continue
+            if key.startswith("_cannaradar_"):
+                continue
+            payload[key] = value
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
-        return json.dumps(payload)
+        return json.dumps(payload, default=str)
 
 
 def build_logger(job_id: str, stage: str) -> logging.Logger:

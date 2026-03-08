@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cannaradar.local/schemas/cli/v1/init.json",
+  "title": "CannaRadar init output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "cli.v1" },
+    "command": { "const": "init" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["ok", "db_path", "config_path", "fetch_policies_path", "run_state_dir", "doctor"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "db_path": { "type": "string" },
+        "config_path": { "type": "string" },
+        "fetch_policies_path": { "type": "string" },
+        "run_state_dir": { "type": "string" },
+        "doctor": { "type": "object" },
+        "next_steps": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
