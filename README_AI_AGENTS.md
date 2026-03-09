@@ -1,43 +1,33 @@
-# AI Agent Reference: Provider Intelligence
+# AI Agent Reference
 
-This repository contains the active provider-intelligence runtime. Agents should treat it as an evidence-first crawler and export system for New Jersey ASD/ADHD provider intelligence.
+Last verified against commit `0c5e92b`.
 
-## What The Runtime Does
+This repository is an evidence-first provider intelligence runtime for New Jersey ASD/ADHD provider discovery, verification, and export.
 
-- crawls seed sources and discovered provider pages
-- extracts diagnostic and operational signals
-- resolves provider-practice records
-- scores factual confidence and outreach fit separately
-- runs QA and contradiction handling
-- exports provider profiles, evidence bundles, review queue rows, and sales briefs
+## Read In This Order
+
+1. [`README.md`](README.md)
+2. [`docs/architecture.md`](docs/architecture.md)
+3. [`docs/runtime-and-pipeline.md`](docs/runtime-and-pipeline.md)
+4. [`docs/cli-reference.md`](docs/cli-reference.md)
+5. [`docs/operations.md`](docs/operations.md)
+6. [`docs/security-and-safety.md`](docs/security-and-safety.md)
 
 ## Canonical Commands
 
-- `python3.11 provider_intel_cli.py init --json`
-- `python3.11 provider_intel_cli.py doctor --json`
-- `python3.11 provider_intel_cli.py sync --json --max 50 --limit 100`
-- `python3.11 provider_intel_cli.py status --json`
-- `python3.11 provider_intel_cli.py search --json --preset outreach-ready`
-- `python3.11 provider_intel_cli.py export --json --limit 100`
-- `python3.11 provider_intel_cli.py control --json --run-id latest show`
-
-## Read First
-
-1. [README.md](/Users/horcrux/Development/CannaRadar/README.md)
-2. [docs/RUNBOOK_V1.md](/Users/horcrux/Development/CannaRadar/docs/RUNBOOK_V1.md)
-3. [docs/AGENT_OPS_PLAYBOOK.md](/Users/horcrux/Development/CannaRadar/docs/AGENT_OPS_PLAYBOOK.md)
-4. [SKILL.md](/Users/horcrux/Development/CannaRadar/SKILL.md)
+```bash
+python3.11 provider_intel_cli.py init --json
+python3.11 provider_intel_cli.py doctor --json
+python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
+python3.11 provider_intel_cli.py status --json
+python3.11 provider_intel_cli.py search --json --preset outreach-ready
+python3.11 provider_intel_cli.py control --json --run-id latest show
+python3.11 provider_intel_cli.py export --json --limit 100
+```
 
 ## Agent Rules
 
-- Never claim ASD/ADHD diagnosis, license status, or prescribing capability without evidence.
-- Prefer bounded live runs before broad seed-pack runs.
-- Use `review_queue` as a normal safety output, not a failure.
-- Keep `record_confidence` and `outreach_fit_score` conceptually separate.
-- If live output is noisy, tighten crawl controls or extraction rules before scaling.
-
-## Fast Live Validation
-
-Use the reusable example pack:
-
-- `python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10`
+- Evidence beats inference.
+- Unknown is acceptable; fabricated certainty is not.
+- Approved exports and sales briefs are downstream of QA, not a substitute for QA.
+- Use domain controls before changing extraction logic when the issue is crawl noise.

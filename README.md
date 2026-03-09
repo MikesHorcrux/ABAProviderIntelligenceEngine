@@ -1,45 +1,25 @@
-# Provider Intelligence Engine
+# ABA Provider Intelligence Engine
 
-Evidence-backed provider intelligence for New Jersey ASD/ADHD diagnostic pathways.
+Last verified against commit `0c5e92b`.
 
-## What This Is
+Evidence-backed provider intelligence for New Jersey autism and ADHD diagnostic pathways. The runtime crawls live provider sources, extracts explicit diagnostic and licensing signals, scores confidence, queues uncertain records for review, and exports profiles plus outreach-ready sales briefs.
 
-This repository runs a local-first crawl and enrichment pipeline that finds providers and practices, verifies whether they appear to diagnose autism and/or ADHD, classifies likely prescribing authority by credential and New Jersey rules, and exports:
+## Who It Is For
 
-- canonical provider records
-- evidence bundles
-- client-facing provider profiles
-- sales-facing outreach briefs for outreach-ready records
-- review queue records for anything uncertain
+- Developers extending the crawler, extractors, or export pipeline.
+- Operators running bounded live crawls, resuming failed jobs, and diagnosing noisy domains.
+- Non-technical stakeholders who need vetted provider intelligence instead of raw lead lists.
 
-The product goal is provider intelligence, not raw lead generation. If a critical claim is not source-backed, the system should queue the record for review instead of exporting it as fact.
+## What It Gives You
 
-## What It Produces
+- A canonical SQLite-backed record set in `data/provider_intel_v1.db`.
+- Evidence-linked provider exports under `out/provider_intel/`.
+- Review-queue outputs for records that should not ship as truth yet.
+- Sales-facing briefs for records that pass both factual QA and outreach readiness.
 
-Runs write outputs under `out/provider_intel/`:
+The runtime is evidence-first. If a critical claim is not source-backed, QA blocks export in `pipeline/stages/qa.py`.
 
-- `provider_records_<run_id>.csv`
-- `provider_records_<run_id>.json`
-- `sales_report_<run_id>.csv`
-- `review_queue_<run_id>.csv`
-- `profiles/<record_id>/profile.md`
-- `profiles/<record_id>/profile.pdf`
-- `outreach/<record_id>/sales_brief.md`
-- `outreach/<record_id>/sales_brief.pdf`
-- `evidence/<record_id>.json`
-
-State and resumability data live under `data/state/agent_runs/`. The primary SQLite database is `data/provider_intel_v1.db`.
-
-## Install
-
-Requirements:
-
-- macOS or Linux
-- Python `3.11`
-- `pip`
-- Playwright Chromium for JS-heavy sites and PDF rendering
-
-Setup:
+## 5-Minute Quickstart
 
 ```bash
 git clone https://github.com/MikesHorcrux/CannaRadar.git
@@ -50,102 +30,73 @@ python3.11 -m pip install -r requirements.txt
 python3.11 -m playwright install chromium
 python3.11 provider_intel_cli.py init --json
 python3.11 provider_intel_cli.py doctor --json
-```
-
-If `doctor` returns `ok: true`, the runtime is ready.
-
-## Quick Start
-
-Run the full NJ pilot flow:
-
-```bash
-python3.11 provider_intel_cli.py sync --json --max 50 --limit 100
+python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
 python3.11 provider_intel_cli.py status --json
 ```
 
-Re-export the latest approved records:
+What to expect:
+
+- `init` creates `crawler_config.json`, `fetch_policies.json`, `data/provider_intel_v1.db`, and `data/state/agent_runs/`.
+- `doctor` validates Python, config, writable paths, schema metadata, and Crawlee/Playwright availability.
+- `sync` runs `seed_ingest -> crawl -> extract -> resolve -> score -> qa -> export`.
+- `status` summarizes run state, DB counts, and the latest export artifacts.
+
+## Key Commands
 
 ```bash
+python3.11 provider_intel_cli.py init --json
+python3.11 provider_intel_cli.py doctor --json
+python3.11 provider_intel_cli.py sync --json --max 50 --limit 100
+python3.11 provider_intel_cli.py sync --json --resume latest
+python3.11 provider_intel_cli.py search --json --preset outreach-ready
+python3.11 provider_intel_cli.py search --json --preset review-queue
+python3.11 provider_intel_cli.py control --json --run-id latest show
 python3.11 provider_intel_cli.py export --json --limit 100
 ```
 
-Search the local state:
+## Primary Outputs
 
-```bash
-python3.11 provider_intel_cli.py search --json "cassia"
-python3.11 provider_intel_cli.py search --json --preset outreach-ready
-python3.11 provider_intel_cli.py search --json --preset review-queue
-```
+Runs write to `out/provider_intel/`:
 
-Inspect raw SQLite state:
+- `provider_records_<run_id>.csv`
+- `provider_records_<run_id>.json`
+- `review_queue_<run_id>.csv`
+- `sales_report_<run_id>.csv`
+- `profiles/<record_id>/profile.md`
+- `profiles/<record_id>/profile.pdf`
+- `outreach/<record_id>/sales_brief.md`
+- `outreach/<record_id>/sales_brief.pdf`
+- `evidence/<record_id>.json`
 
-```bash
-python3.11 provider_intel_cli.py sql --json --query "SELECT provider_name_snapshot, record_confidence FROM provider_practice_records ORDER BY record_confidence DESC LIMIT 20"
-```
+## Current Scope And Boundaries
 
-Resume an interrupted run:
+- Geography: New Jersey only.
+- Conditions: ASD and ADHD diagnostic capability.
+- Prescribing classification: New Jersey rules in `reference/prescriber_rules/nj.json`.
+- Canonical export unit: one provider-practice-state affiliation record.
+- PDF generation: currently a minimal fallback PDF writer in `pipeline/stages/export.py`; Playwright is used for crawling, not current PDF rendering.
 
-```bash
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py sync --json --resume latest
-```
+## Documentation Map
 
-## Bounded Live Test
+- [`docs/README.md`](docs/README.md): full documentation index by audience.
+- [`docs/architecture.md`](docs/architecture.md): system overview, module boundaries, and architecture diagrams.
+- [`docs/data-model.md`](docs/data-model.md): entities, tables, schemas, and ER diagrams.
+- [`docs/runtime-and-pipeline.md`](docs/runtime-and-pipeline.md): stage-by-stage execution, checkpoints, and failure handling.
+- [`docs/cli-reference.md`](docs/cli-reference.md): command and flag reference with examples.
+- [`docs/operations.md`](docs/operations.md): setup, monitoring, incident response, and recovery.
+- [`docs/security-and-safety.md`](docs/security-and-safety.md): evidence gates, secrets model, and data handling boundaries.
+- [`docs/testing-and-quality.md`](docs/testing-and-quality.md): test coverage, gaps, and release checks.
+- [`docs/faq.md`](docs/faq.md): short answers for operators, developers, and stakeholders.
+- [`docs/adr/`](docs/adr/): architecture decisions and tradeoffs.
 
-Use the reusable two-source live test pack in [seed_packs/examples/cassia_live_test.json](/Users/horcrux/Development/CannaRadar/seed_packs/examples/cassia_live_test.json):
+## Fast Validation Pack
+
+Use `seed_packs/examples/cassia_live_test.json` for a bounded live test:
 
 ```bash
 python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
 ```
 
-That pack is meant for validating the end-to-end pipeline against one live NJ provider and one live public-profile verification source without running the whole statewide pack.
-
-## Pipeline
-
-Stage order:
-
-1. `seed_ingest`
-2. `crawl`
-3. `extract`
-4. `resolve`
-5. `score`
-6. `qa`
-7. `export`
-
-Key rules:
-
-- exported critical fields must have evidence
-- official or first-party evidence should win over secondary directories
-- low-confidence or contradictory records go to `review_queue`
-- `record_confidence` proves factual quality
-- `outreach_fit_score` ranks approved records for sales use
-
-## Current Scope
-
-- geography: New Jersey
-- conditions: autism and ADHD diagnostic capability
-- prescribing logic: New Jersey rules only
-- canonical export unit: one provider-practice-state affiliation record
-
-## Current Limitations
-
-The engine is real and working end to end, but it still needs crawl hygiene and parser hardening on noisy domains. In live runs today, the main quality issues are:
-
-- noisy side-page discovery on some directory domains
-- imperfect phone extraction on some public profile pages
-- evidence snippets that sometimes include title or style noise
-- review-queue junk records from over-broad provider name matching on certain templates
-
-Use bounded runs and inspect outputs before scaling.
-
-## Docs
-
-- [docs/README.md](/Users/horcrux/Development/CannaRadar/docs/README.md)
-- [docs/AGENT_OPS_PLAYBOOK.md](/Users/horcrux/Development/CannaRadar/docs/AGENT_OPS_PLAYBOOK.md)
-- [docs/RUNBOOK_V1.md](/Users/horcrux/Development/CannaRadar/docs/RUNBOOK_V1.md)
-- [README_AI_AGENTS.md](/Users/horcrux/Development/CannaRadar/README_AI_AGENTS.md)
-- [SKILL.md](/Users/horcrux/Development/CannaRadar/SKILL.md)
-
 ## Legacy Note
 
-`cannaradar_cli.py` remains only as a redirect shim to `provider_intel_cli.py`.
+`cannaradar_cli.py` is intentionally retired and exits immediately with a redirect to `provider_intel_cli.py`.
