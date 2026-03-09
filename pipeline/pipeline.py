@@ -837,10 +837,11 @@ class PipelineRunner:
     def run_score(self) -> int:
         start = log_stage_start(self.logger, "score", self.job_id)
         con = connect_db(self.db_path, SCHEMA_PATH)
-        run_score(con)
+        scores_written = run_score(con, run_id=self.job_id)
         con.close()
+        self.metrics.inc("scores_written", scores_written)
         log_stage_end(self.logger, "score", self.job_id, start, self.metrics.snapshot())
-        return self.metrics.snapshot().get("scores_written", 0)
+        return scores_written
 
     def run_lead_research(
         self,

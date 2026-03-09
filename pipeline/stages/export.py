@@ -862,6 +862,30 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _external_research_status_payload(
+    *,
+    lead_id: str,
+    report_id: str,
+    company_name: str,
+    report_relpath: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": "external_research.v1",
+        "lead_id": lead_id,
+        "report_id": report_id,
+        "company_name": company_name,
+        "status": "pending",
+        "agent_name": "",
+        "started_at": "",
+        "completed_at": "",
+        "updated_at": utcnow_iso(),
+        "output_path": report_relpath,
+        "source_count": 0,
+        "last_error": "",
+        "notes": "",
+    }
+
+
 def _write_lead_map_csv(path: Path, rows: list[dict[str, str]]) -> None:
     headers = [
         "lead_id",
@@ -884,6 +908,8 @@ def _write_lead_map_csv(path: Path, rows: list[dict[str, str]]) -> None:
         "report",
         "agent_brief",
         "agent_prompt",
+        "external_research_status",
+        "external_research_report",
     ]
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
@@ -981,6 +1007,8 @@ def _write_agent_research_brief(
                     f"Company strategy: {packet_files['company_strategy']}",
                     f"Outreach sequence: {packet_files['outreach_sequence']}",
                     f"Report: {packet_files['report']}",
+                    f"External research status: {packet_files['external_research_status']}",
+                    f"External research report: {packet_files['external_research_report']}",
                     "Contact profiles under contacts/",
                 ]
             ),
@@ -992,6 +1020,7 @@ def _write_agent_research_brief(
                     "Add source URLs for every factual claim introduced.",
                     "If you cannot verify a fact, write unknown instead of guessing.",
                     "Keep company facts separate from inferred messaging guidance.",
+                    "Set external_research_status.json to in_progress when work starts and completed only after the external report exists.",
                 ]
             ),
             "",
@@ -1045,6 +1074,8 @@ def _write_agent_prompt(
             f"- {packet_files['company_strategy']}",
             f"- {packet_files['outreach_sequence']}",
             f"- {packet_files['report']}",
+            f"- {packet_files['external_research_status']}",
+            f"- {packet_files['external_research_report']}",
             "- contacts/*.md",
             "",
             "Output rules:",
@@ -1052,6 +1083,7 @@ def _write_agent_prompt(
             "- Mark unverifiable facts as unknown.",
             "- Keep inferred messaging guidance clearly separate from factual observations.",
             "- Do not overwrite verified facts with lower-confidence guesses.",
+            "- Set external_research_status.json to in_progress when you begin, then completed with completed_at and source_count after writing external_research_report.md.",
             "",
             "Start by reviewing the current package files, then research the company website and named contacts.",
             "",
@@ -1121,6 +1153,7 @@ def _write_report_markdown(
                     f"Outreach sequence: [{Path(packet_files['outreach_sequence']).name}]({packet_files['outreach_sequence']})",
                     f"Agent brief: [{Path(packet_files['agent_brief']).name}]({packet_files['agent_brief']})",
                     f"Agent prompt: [{Path(packet_files['agent_prompt']).name}]({packet_files['agent_prompt']})",
+                    f"External research status: [{Path(packet_files['external_research_status']).name}]({packet_files['external_research_status']})",
                 ]
             ),
             "",
@@ -1179,6 +1212,8 @@ def export_lead_intelligence_dossier(
         "agent_brief",
         "agent_prompt",
         "agent_packet",
+        "external_research_status",
+        "external_research_report",
     ]
 
     if int(limit) <= 0:
@@ -1196,6 +1231,8 @@ def export_lead_intelligence_dossier(
                 "run_id": run_id,
                 "company_count": 0,
                 "row_count": 0,
+                "package_count": 0,
+                "external_research_contract_version": "external_research.v1",
                 "packages": [],
             },
         )
@@ -1206,6 +1243,7 @@ def export_lead_intelligence_dossier(
             "profiles_dir": str(packages_dir),
             "packages_dir": str(packages_dir),
             "company_count": 0,
+            "package_count": 0,
             "row_count": 0,
             "generated_at": utcnow_iso(),
             "run_id": run_id,
@@ -1389,6 +1427,8 @@ def export_lead_intelligence_dossier(
                     "agent_brief": str((company_dir / "agent_research_brief.md").relative_to(dossier_dir)),
                     "agent_prompt": str((company_dir / "agent_research_prompt.md").relative_to(dossier_dir)),
                     "agent_packet": str((company_dir / "agent_research_packet.json").relative_to(dossier_dir)),
+                    "external_research_status": str((company_dir / "external_research_status.json").relative_to(dossier_dir)),
+                    "external_research_report": str((company_dir / "external_research_report.md").relative_to(dossier_dir)),
                 }
             )
 
@@ -1400,6 +1440,8 @@ def export_lead_intelligence_dossier(
             "agent_brief": "agent_research_brief.md",
             "agent_prompt": "agent_research_prompt.md",
             "agent_packet": "agent_research_packet.json",
+            "external_research_status": "external_research_status.json",
+            "external_research_report": "external_research_report.md",
             "report": "report.md",
             "contacts_dir": "contacts",
             "contact_files": contact_files,
@@ -1471,6 +1513,16 @@ def export_lead_intelligence_dossier(
         }
         _write_json(company_dir / "lead_summary.json", lead_summary_payload)
 
+        _write_json(
+            company_dir / "external_research_status.json",
+            _external_research_status_payload(
+                lead_id=lead_id,
+                report_id=report_id,
+                company_name=str(candidate["company_name"]),
+                report_relpath=packet_files["external_research_report"],
+            ),
+        )
+
         agent_packet_payload: dict[str, object] = {
             "lead_id": lead_id,
             "report_id": report_id,
@@ -1490,7 +1542,17 @@ def export_lead_intelligence_dossier(
                 "report": packet_files["report"],
                 "agent_brief": packet_files["agent_brief"],
                 "agent_prompt": packet_files["agent_prompt"],
+                "external_research_status": packet_files["external_research_status"],
+                "external_research_report": packet_files["external_research_report"],
                 "contacts_dir": packet_files["contacts_dir"],
+            },
+            "external_completion_contract": {
+                "status_file": packet_files["external_research_status"],
+                "report_file": packet_files["external_research_report"],
+                "valid_status_values": ["pending", "in_progress", "completed", "failed"],
+                "completion_rule": (
+                    "Set status to completed only after external_research_report.md exists and completed_at/source_count are populated."
+                ),
             },
             "tasks": [
                 "Verify company overview, footprint, and operational stack.",
@@ -1562,6 +1624,8 @@ def export_lead_intelligence_dossier(
                 "agent_prompt": str((company_dir / "agent_research_prompt.md").relative_to(dossier_dir)),
                 "agent_packet": str((company_dir / "agent_research_packet.json").relative_to(dossier_dir)),
                 "lead_summary": str((company_dir / "lead_summary.json").relative_to(dossier_dir)),
+                "external_research_status": str((company_dir / "external_research_status.json").relative_to(dossier_dir)),
+                "external_research_report": str((company_dir / "external_research_report.md").relative_to(dossier_dir)),
                 "contact_count": len(contacts),
                 "location_count": location_count,
                 "research_status": research_status,
@@ -1630,6 +1694,7 @@ def export_lead_intelligence_dossier(
             "company_count": len(selected_orgs),
             "row_count": len(index_rows),
             "package_count": len(package_records),
+            "external_research_contract_version": "external_research.v1",
             "packages": package_records,
         },
     )

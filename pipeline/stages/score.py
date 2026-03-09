@@ -79,8 +79,10 @@ def _parse_tier_chain(signal: str) -> bool:
     return any(x in txt for x in bad)
 
 
-def run_score(con):
+def run_score(con, *, run_id: str | None = None) -> int:
     now = utcnow_iso()
+    effective_run_id = str(run_id or now)
+    scores_written = 0
     rows = con.execute(
         "SELECT location_pk, canonical_name, website_domain, fit_score, state FROM locations WHERE COALESCE(deleted_at,'')=''"
     ).fetchall()
@@ -134,7 +136,7 @@ def run_score(con):
         score_pk = make_pk("ls", [loc_pk, now])
         con.execute(
             "INSERT OR REPLACE INTO lead_scores (score_pk, location_pk, score_total, tier, run_id, created_at, as_of, deleted_at) VALUES (?,?,?,?,?,?,?,'')",
-            (score_pk, loc_pk, total, tier, now, now, now),
+            (score_pk, loc_pk, total, tier, effective_run_id, now, now),
         )
         for key in FEATURE_KEYS:
             con.execute(
@@ -149,4 +151,6 @@ def run_score(con):
             "UPDATE locations SET fit_score = ?, updated_at=?, last_seen_at=? WHERE location_pk=?",
             (total, now, now, loc_pk),
         )
+        scores_written += 1
     con.commit()
+    return scores_written

@@ -9,10 +9,16 @@ import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 
+import cli.query as query_module
 from cli.app import main as cli_main, make_parser
 from cli.sync import execute_export
 from pipeline.run_control import ensure_run_control
 from pipeline.run_state import create_run_state, save_run_state
+from pipeline.stages.score import run_score
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_PATH = ROOT / "db" / "schema.sql"
 
 
 def _run_cli(argv: list[str]) -> tuple[int, dict[str, object]]:
@@ -23,8 +29,15 @@ def _run_cli(argv: list[str]) -> tuple[int, dict[str, object]]:
     return code, payload
 
 
-def _seed_demo_rows(db_path: Path) -> None:
+def _connect_with_schema(db_path: Path) -> sqlite3.Connection:
     con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    return con
+
+
+def _seed_demo_rows(db_path: Path) -> None:
+    con = _connect_with_schema(db_path)
     now = "2026-03-08T00:00:00"
     con.execute(
         """
@@ -253,6 +266,174 @@ def test_json_usage_error_envelope() -> None:
     assert payload["error"]["code"] == "usage_error"
 
 
+def test_json_flag_after_subcommand_matches_documented_usage() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        checkpoint_dir = root / "checkpoints"
+        code, payload = _run_cli(
+            [
+                "--db",
+                str(root / "demo.db"),
+                "status",
+                "--checkpoint-dir",
+                str(checkpoint_dir),
+                "--json",
+            ]
+        )
+        assert code == 0
+        assert payload["ok"] is True
+        assert payload["command"] == "status"
+
+
+def test_run_score_uses_pipeline_run_id_when_provided() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db_path = Path(td) / "score.db"
+        con = _connect_with_schema(db_path)
+        now = "2026-03-08T00:00:00"
+        con.execute(
+            """
+            INSERT OR REPLACE INTO organizations
+            (org_pk, legal_name, dba_name, state, created_at, updated_at, last_seen_at, deleted_at)
+            VALUES ('org_score', 'Score Org', 'Score Org', 'CA', ?, ?, ?, '')
+            """,
+            (now, now, now),
+        )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO locations
+            (location_pk, org_pk, canonical_name, address_1, city, state, zip, website_domain, phone, fit_score, last_crawled_at, created_at, updated_at, last_seen_at, deleted_at)
+            VALUES ('loc_score', 'org_score', 'Score Shop', '', 'Los Angeles', 'CA', '', 'score.example', '(555) 000-1111', 0, ?, ?, ?, ?, '')
+            """,
+            (now, now, now, now),
+        )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO contacts
+            (contact_pk, location_pk, full_name, role, email, phone, source_kind, confidence, verification_status, created_at, updated_at, last_seen_at, deleted_at)
+            VALUES ('contact_score', 'loc_score', 'Pat Buyer', 'Buyer', 'pat@score.example', '', 'test', 0.9, 'verified', ?, ?, ?, '')
+            """,
+            (now, now, now),
+        )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO contact_points
+            (contact_pk, location_pk, type, value, confidence, source_url, first_seen_at, last_seen_at, created_at, updated_at, deleted_at)
+            VALUES
+            ('cp_score_email', 'loc_score', 'email', 'pat@score.example', 0.9, 'https://score.example/contact', ?, ?, ?, ?, ''),
+            ('cp_score_phone', 'loc_score', 'phone', '(555) 000-1111', 0.9, 'https://score.example/contact', ?, ?, ?, ?, '')
+            """,
+            (now, now, now, now, now, now, now, now),
+        )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO evidence
+            (evidence_pk, entity_type, entity_pk, field_name, field_value, source_url, snippet, captured_at, deleted_at)
+            VALUES ('ev_score_menu', 'location', 'loc_score', 'menu_provider', 'dutchie', 'https://score.example/menu', 'menu provider', ?, '')
+            """,
+            (now,),
+        )
+        con.commit()
+
+        scores_written = run_score(con, run_id="score-run")
+        score_row = con.execute(
+            """
+            SELECT run_id, score_total, tier
+            FROM lead_scores
+            WHERE location_pk='loc_score'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        con.close()
+
+        assert scores_written == 1
+        assert score_row is not None
+        assert score_row["run_id"] == "score-run"
+        assert int(score_row["score_total"] or 0) > 0
+
+
+def test_status_reports_external_research_contract_progress() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        db_path = root / "status.db"
+        out_dir = root / "out"
+        state_dir = root / "data" / "state"
+        dossier_dir = out_dir / "lead_intelligence"
+        package_dir = dossier_dir / "leads" / "disp001-demo"
+        package_dir.mkdir(parents=True, exist_ok=True)
+        _connect_with_schema(db_path).close()
+
+        (state_dir / "last_run_manifest.json").parent.mkdir(parents=True, exist_ok=True)
+        (state_dir / "last_run_manifest.json").write_text("{}", encoding="utf-8")
+        (state_dir / "run_v4.lock").write_text("", encoding="utf-8")
+        (dossier_dir / "lead_intelligence_manifest.json").write_text(
+            json.dumps(
+                {
+                    "generated_at": "2026-03-09T00:00:00+00:00",
+                    "run_id": "demo-run",
+                    "package_count": 1,
+                    "external_research_contract_version": "external_research.v1",
+                    "packages": [
+                        {
+                            "lead_id": "DISP001",
+                            "company_name": "Demo Dispensary",
+                            "package_dir": "leads/disp001-demo",
+                            "external_research_status": "leads/disp001-demo/external_research_status.json",
+                            "external_research_report": "leads/disp001-demo/external_research_report.md",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (package_dir / "external_research_status.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "external_research.v1",
+                    "lead_id": "DISP001",
+                    "company_name": "Demo Dispensary",
+                    "status": "completed",
+                    "agent_name": "clawbot",
+                    "completed_at": "2026-03-09T00:01:00+00:00",
+                    "updated_at": "2026-03-09T00:01:00+00:00",
+                    "output_path": "external_research_report.md",
+                    "source_count": 4,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (package_dir / "external_research_report.md").write_text("# External Research\n", encoding="utf-8")
+
+        original_manifest_path = query_module.MANIFEST_PATH
+        original_lock_path = query_module.LOCK_PATH
+        original_out_dir = query_module.OUT_DIR
+        query_module.MANIFEST_PATH = state_dir / "last_run_manifest.json"
+        query_module.LOCK_PATH = state_dir / "run_v4.lock"
+        query_module.OUT_DIR = out_dir
+        try:
+            code, payload = _run_cli(
+                [
+                    "--json",
+                    "--db",
+                    str(db_path),
+                    "status",
+                ]
+            )
+        finally:
+            query_module.MANIFEST_PATH = original_manifest_path
+            query_module.LOCK_PATH = original_lock_path
+            query_module.OUT_DIR = original_out_dir
+
+        assert code == 0
+        external = payload["data"]["external_research"]
+        assert external["package_count"] == 1
+        assert external["completed_count"] == 1
+        assert external["completed_with_report_count"] == 1
+        assert external["packages"][0]["agent_name"] == "clawbot"
+        assert external["packages"][0]["status"] == "completed"
+        assert external["packages"][0]["report_exists"] is True
+
+
 def test_execute_export_supports_intelligence_kind() -> None:
     args = make_parser().parse_args(["export", "--kind", "intelligence", "--limit", "7", "--tier", "B"])
     assert args.kind == "intelligence"
@@ -291,6 +472,9 @@ def test_execute_export_supports_intelligence_kind() -> None:
 def run() -> None:
     test_init_doctor_sql_and_search()
     test_json_usage_error_envelope()
+    test_json_flag_after_subcommand_matches_documented_usage()
+    test_run_score_uses_pipeline_run_id_when_provided()
+    test_status_reports_external_research_contract_progress()
     test_execute_export_supports_intelligence_kind()
     print("test_agent_cli: ok")
 

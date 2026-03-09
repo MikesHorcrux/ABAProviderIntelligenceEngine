@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "data" / "state" / "last_run_manifest.json"
 LOCK_PATH = ROOT / "data" / "state" / "run_v4.lock"
 OUT_DIR = ROOT / "out"
+EXTERNAL_RESEARCH_ALLOWED_STATUSES = {"pending", "in_progress", "completed", "failed"}
 
 READ_ONLY_PREFIXES = ("select", "with")
 FORBIDDEN_SQL_TERMS = (
@@ -168,6 +169,80 @@ def _file_snapshot(path: Path) -> dict[str, Any]:
     }
 
 
+def _external_research_summary(out_dir: Path) -> dict[str, Any]:
+    dossier_dir = out_dir / "lead_intelligence"
+    manifest_path = dossier_dir / "lead_intelligence_manifest.json"
+    manifest = _read_json(manifest_path) or {}
+    packages = list(manifest.get("packages") or [])
+    package_rows: list[dict[str, Any]] = []
+    counts = {
+        "pending": 0,
+        "in_progress": 0,
+        "completed": 0,
+        "failed": 0,
+        "contract_missing": 0,
+        "invalid": 0,
+    }
+    completed_with_report_count = 0
+
+    for package in packages:
+        if not isinstance(package, dict):
+            continue
+        package_dir_rel = str(package.get("package_dir") or "").strip()
+        if not package_dir_rel:
+            continue
+        package_dir = dossier_dir / package_dir_rel
+        status_rel = str(package.get("external_research_status") or f"{package_dir_rel}/external_research_status.json")
+        report_rel = str(package.get("external_research_report") or f"{package_dir_rel}/external_research_report.md")
+        status_path = dossier_dir / status_rel
+        report_path = dossier_dir / report_rel
+        status_payload = _read_json(status_path) if status_path.exists() else None
+        raw_status = str((status_payload or {}).get("status") or "").strip().lower()
+        if not status_path.exists():
+            status = "contract_missing"
+        elif raw_status in EXTERNAL_RESEARCH_ALLOWED_STATUSES:
+            status = raw_status
+        else:
+            status = "invalid"
+        counts[status] = int(counts.get(status, 0)) + 1
+        report_exists = report_path.exists()
+        if status == "completed" and report_exists:
+            completed_with_report_count += 1
+        package_rows.append(
+            {
+                "lead_id": str(package.get("lead_id") or ""),
+                "company_name": str(package.get("company_name") or ""),
+                "package_dir": str(package_dir),
+                "status": status,
+                "status_file": str(status_path),
+                "status_file_exists": status_path.exists(),
+                "report_path": str(report_path),
+                "report_exists": report_exists,
+                "agent_name": str((status_payload or {}).get("agent_name") or ""),
+                "started_at": str((status_payload or {}).get("started_at") or ""),
+                "completed_at": str((status_payload or {}).get("completed_at") or ""),
+                "updated_at": str((status_payload or {}).get("updated_at") or ""),
+                "source_count": int((status_payload or {}).get("source_count") or 0),
+                "last_error": str((status_payload or {}).get("last_error") or ""),
+            }
+        )
+
+    return {
+        "manifest_path": str(manifest_path),
+        "manifest_exists": manifest_path.exists(),
+        "contract_version": str(manifest.get("external_research_contract_version") or ""),
+        "package_count": len(package_rows),
+        "pending_count": counts["pending"],
+        "in_progress_count": counts["in_progress"],
+        "completed_count": counts["completed"],
+        "failed_count": counts["failed"],
+        "completed_with_report_count": completed_with_report_count,
+        "contract_missing_count": counts["contract_missing"],
+        "invalid_count": counts["invalid"],
+        "packages": package_rows,
+    }
+
+
 def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -> dict[str, Any]:
     manifest = _read_json(MANIFEST_PATH) or {}
     checkpoint = None
@@ -218,6 +293,7 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
         "manifest": manifest,
         "checkpoint": checkpoint or {},
         "control": control_summary,
+        "external_research": _external_research_summary(OUT_DIR),
         "lock": _file_snapshot(LOCK_PATH),
         "outputs": {
             "research_queue": _file_snapshot(OUT_DIR / "research_queue.csv"),

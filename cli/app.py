@@ -189,6 +189,30 @@ def _canonical_command(command: str) -> str:
     return mapping.get(command, command)
 
 
+def _extract_output_format_flags(argv: list[str]) -> tuple[list[str], str]:
+    filtered: list[str] = []
+    requested_format = "plain"
+    seen_json = False
+    seen_plain = False
+
+    for arg in argv:
+        if arg == "--json":
+            seen_json = True
+            if seen_plain:
+                raise UsageError("Choose either --json or --plain.")
+            requested_format = "json"
+            continue
+        if arg == "--plain":
+            seen_plain = True
+            if seen_json:
+                raise UsageError("Choose either --json or --plain.")
+            requested_format = "plain"
+            continue
+        filtered.append(arg)
+
+    return filtered, requested_format
+
+
 def _dispatch(args) -> dict[str, object]:
     command = args.command
 
@@ -277,14 +301,15 @@ def _dispatch(args) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    output_format = "json" if "--json" in argv else "plain"
+    argv, output_format = _extract_output_format_flags(argv)
     command = "unknown"
 
     try:
         _require_python_311()
         parser = make_parser()
         args = parser.parse_args(argv)
-        output_format = "json" if args.json else output_format
+        args.json = output_format == "json"
+        args.plain = output_format == "plain"
 
         if args.config:
             os.environ["CANNARADAR_CRAWLER_CONFIG"] = str(Path(args.config).expanduser().resolve())

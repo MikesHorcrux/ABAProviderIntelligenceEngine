@@ -265,6 +265,7 @@ def test_export_lead_intelligence_dossier_builds_index_and_profiles() -> None:
         agent_brief_path = index_path.parent / rows[0]["agent_brief"]
         agent_prompt_path = index_path.parent / rows[0]["agent_prompt"]
         agent_packet_path = index_path.parent / rows[0]["agent_packet"]
+        external_status_path = index_path.parent / rows[0]["external_research_status"]
         assert profile_path.exists()
         assert strategy_path.exists()
         assert package_path.exists()
@@ -273,6 +274,7 @@ def test_export_lead_intelligence_dossier_builds_index_and_profiles() -> None:
         assert agent_brief_path.exists()
         assert agent_prompt_path.exists()
         assert agent_packet_path.exists()
+        assert external_status_path.exists()
         assert "## Overview" in profile_path.read_text(encoding="utf-8")
         assert "Evergreen Cannabis Collective" in profile_path.read_text(encoding="utf-8")
         assert "## Decision Network" in strategy_path.read_text(encoding="utf-8")
@@ -292,6 +294,15 @@ def test_export_lead_intelligence_dossier_builds_index_and_profiles() -> None:
         manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         assert manifest_payload["package_count"] == 1
         assert manifest_payload["packages"][0]["lead_id"] == "DISP001"
+        assert manifest_payload["external_research_contract_version"] == "external_research.v1"
+
+        status_payload = json.loads(external_status_path.read_text(encoding="utf-8"))
+        assert status_payload["status"] == "pending"
+        assert status_payload["output_path"] == "external_research_report.md"
+
+        packet_payload = json.loads(agent_packet_path.read_text(encoding="utf-8"))
+        assert packet_payload["external_completion_contract"]["status_file"] == "external_research_status.json"
+        assert packet_payload["deliverables"]["external_research_report"] == "external_research_report.md"
 
 
 def main() -> None:
