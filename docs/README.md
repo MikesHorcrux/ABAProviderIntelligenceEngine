@@ -1,18 +1,31 @@
 # Provider Intel Docs
 
-This docs set now tracks the provider-intelligence runtime only.
+This docs set explains how to install, operate, validate, and modify the provider-intelligence runtime.
 
 ## Start Here
 
-1. [AGENT_OPS_PLAYBOOK.md](./AGENT_OPS_PLAYBOOK.md)
-2. [RUNBOOK_V1.md](./RUNBOOK_V1.md)
-3. [`docs/schemas/cli/v1/`](./schemas/cli/v1/)
+1. [README.md](/Users/horcrux/Development/CannaRadar/README.md)
+2. [RUNBOOK_V1.md](/Users/horcrux/Development/CannaRadar/docs/RUNBOOK_V1.md)
+3. [AGENT_OPS_PLAYBOOK.md](/Users/horcrux/Development/CannaRadar/docs/AGENT_OPS_PLAYBOOK.md)
+4. [schemas/cli/v1/](/Users/horcrux/Development/CannaRadar/docs/schemas/cli/v1/)
 
-## Current System Shape
+## What Each Doc Is For
 
-- CLI entrypoint: `provider_intel_cli.py`
+- [README.md](/Users/horcrux/Development/CannaRadar/README.md)
+  Human-facing overview, install, quick start, outputs, and scope.
+- [RUNBOOK_V1.md](/Users/horcrux/Development/CannaRadar/docs/RUNBOOK_V1.md)
+  Step-by-step operator instructions for init, doctor, sync, export, recovery, and validation.
+- [AGENT_OPS_PLAYBOOK.md](/Users/horcrux/Development/CannaRadar/docs/AGENT_OPS_PLAYBOOK.md)
+  Concise operating contract for agents making bounded runtime changes or running interventions.
+- [README_AI_AGENTS.md](/Users/horcrux/Development/CannaRadar/README_AI_AGENTS.md)
+  Short AI-agent entrypoint for the active runtime surface.
+- [SKILL.md](/Users/horcrux/Development/CannaRadar/SKILL.md)
+  Repo-local skill card with canonical commands and validation steps.
+
+## Runtime Surface
+
+- CLI: `provider_intel_cli.py`
 - DB: `data/provider_intel_v1.db`
-- Output root: `out/provider_intel/`
+- Outputs: `out/provider_intel/`
+- State: `data/state/agent_runs/`
 - Stage order: `seed_ingest -> crawl -> extract -> resolve -> score -> qa -> export`
-
-The old numbered docs were removed because they no longer describe the runtime that ships in this repository.
