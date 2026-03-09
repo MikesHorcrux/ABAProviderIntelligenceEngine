@@ -5,3 +5,6 @@ reports/
 pipeline_state/
 __pycache__/
 *.pyc
+seeds_mid20.csv
+seeds_smoke*.csv
+seeds_test*.csv

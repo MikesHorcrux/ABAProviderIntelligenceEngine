@@ -1,0 +1,41 @@
+{
+  "enabled": false,
+  "provider_modes": {
+    "openai_api": {
+      "available": true,
+      "notes": "Direct OpenAI API key auth mode."
+    },
+    "codex_auth": {
+      "available": true,
+      "notes": "OpenClaw Codex-authenticated mode."
+    },
+    "clawbot": {
+      "available": false,
+      "notes": "Internal clawbot service mode."
+    }
+  },
+  "model_role_slots": {
+    "summarize": {
+      "model": "gpt-4.1-mini",
+      "preferred_providers": ["openai_api", "codex_auth", "clawbot"]
+    },
+    "research": {
+      "model": "gpt-4.1",
+      "preferred_providers": ["codex_auth", "openai_api", "clawbot"]
+    },
+    "writer": {
+      "model": "gpt-4.1",
+      "preferred_providers": ["openai_api", "codex_auth", "clawbot"]
+    },
+    "qa": {
+      "model": "gpt-4.1-mini",
+      "preferred_providers": ["codex_auth", "openai_api", "clawbot"]
+    }
+  },
+  "fallback_order": ["codex_auth", "openai_api", "clawbot"],
+  "qa_thresholds": {
+    "min_sources": 2,
+    "min_signals": 3,
+    "min_contact_coverage_pct": 50.0
+  }
+}

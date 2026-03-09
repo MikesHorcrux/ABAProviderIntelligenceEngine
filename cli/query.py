@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from agent_runtime.router import status_snapshot as agent_runtime_status_snapshot
 from cli.errors import ConfigError, DataValidationError
 from pipeline.run_control import load_run_control, summarize_run_control
 from pipeline.run_state import latest_run_state, load_run_state
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "data" / "state" / "last_run_manifest.json"
 LOCK_PATH = ROOT / "data" / "state" / "run_v4.lock"
 OUT_DIR = ROOT / "out"
+AGENT_RUNTIME_CONFIG_PATH = ROOT / "config" / "agent_runtime.json"
 EXTERNAL_RESEARCH_ALLOWED_STATUSES = {"pending", "in_progress", "completed", "failed"}
 
 READ_ONLY_PREFIXES = ("select", "with")
@@ -293,6 +295,7 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
         "manifest": manifest,
         "checkpoint": checkpoint or {},
         "control": control_summary,
+        "agent_runtime": agent_runtime_status_snapshot(AGENT_RUNTIME_CONFIG_PATH),
         "external_research": _external_research_summary(OUT_DIR),
         "lock": _file_snapshot(LOCK_PATH),
         "outputs": {

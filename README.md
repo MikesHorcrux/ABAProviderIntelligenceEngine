@@ -181,6 +181,19 @@ Primary runtime outputs:
 
 The key promise is determinism: the pipeline writes stable files and stable machine-readable CLI envelopes so an operator or agent can reason about what happened without scraping console text.
 
+## OpenClaw Agent Runtime (scaffold)
+
+This repo now includes additive scaffold contracts for OpenClaw provider routing and QA gates under `agent_runtime/`, plus status visibility in `status --json` via `data.agent_runtime`.
+
+Enable the scaffold config locally:
+
+```bash
+cp config/agent_runtime.example.json config/agent_runtime.json
+python3.11 cannaradar_cli.py status --json
+```
+
+Then set provider availability, role slots, fallback order, and thresholds in `config/agent_runtime.json`. Current provider calls are TODO stubs by design.
+
 ## Operational Invariants
 
 - Discovery is deduped by normalized `website + state`.
