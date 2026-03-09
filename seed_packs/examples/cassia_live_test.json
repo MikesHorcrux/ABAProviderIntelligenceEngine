@@ -1,0 +1,28 @@
+{
+  "schema_version": "seed_pack.v1",
+  "state": "NJ",
+  "sources": [
+    {
+      "name": "Cassia Mosdell, PsyD - Psychoeducational Evaluations, Adhd, Autism, Dyslexia, Assessment",
+      "website": "https://cassiamosdell.com/evaluations",
+      "state": "NJ",
+      "metro": "Union County",
+      "tier": "C",
+      "source_type": "practice_site",
+      "browser_required": false,
+      "extraction_profile": "practice",
+      "priority": 120
+    },
+    {
+      "name": "Cassia Mosdell NPINO",
+      "website": "https://npino.com/psychologist/1104663749-dr.-cassia-mosdell/",
+      "state": "NJ",
+      "metro": "Union County",
+      "tier": "B",
+      "source_type": "licensing_board",
+      "browser_required": false,
+      "extraction_profile": "board",
+      "priority": 118
+    }
+  ]
+}

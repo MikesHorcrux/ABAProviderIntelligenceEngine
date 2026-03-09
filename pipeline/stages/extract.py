@@ -340,6 +340,23 @@ def _provider_candidates(text: str, seed: DiscoverySeed) -> list[ProviderCandida
             if key not in candidates_by_name:
                 candidates_by_name[key] = ProviderCandidate(provider_name=provider_name, credentials="", start=match.start(), end=match.end())
             break
+        if not candidates_by_name:
+            head = text[:600]
+            for pattern in (PROVIDER_WITH_CREDENTIAL_RE, DR_PROVIDER_RE):
+                match = pattern.search(head)
+                if not match:
+                    continue
+                provider_name = _clean_provider_name(match.group(1))
+                if not provider_name:
+                    continue
+                credentials = _clean_credentials(match.group(2)) if match.lastindex and match.lastindex > 1 else ""
+                candidates_by_name[provider_name.lower()] = ProviderCandidate(
+                    provider_name=provider_name,
+                    credentials=credentials,
+                    start=match.start(),
+                    end=match.end(),
+                )
+                break
 
     return sorted(candidates_by_name.values(), key=lambda item: (item.start, item.provider_name.lower()))
 
