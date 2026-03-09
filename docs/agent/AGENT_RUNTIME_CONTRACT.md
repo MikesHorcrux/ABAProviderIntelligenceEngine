@@ -22,7 +22,8 @@ Package: `agent_runtime/`
 - `select_provider_for_role(role, config)`
 - `evaluate_qa_gates(metrics, thresholds)`
 - `status_snapshot(config_path)`
-- `invoke_provider_stub(selection, call)` (placeholder only)
+- `invoke_provider_stub(selection, call)` (backward-compatible wrapper)
+- `invoke_provider_mode(mode, model, call)` (provider adapter entrypoint)
 
 ## Config Shape
 

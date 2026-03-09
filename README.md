@@ -192,7 +192,15 @@ cp config/agent_runtime.example.json config/agent_runtime.json
 python3.11 cannaradar_cli.py status --json
 ```
 
-Then set provider availability, role slots, fallback order, and thresholds in `config/agent_runtime.json`. Current provider calls are TODO stubs by design.
+Then set provider availability, role slots, fallback order, and thresholds in `config/agent_runtime.json`.
+
+Run external research package generation (provider-backed):
+
+```bash
+python3 cannaradar_cli.py agent:external-research --limit 5
+```
+
+This command processes pending package contracts under `out/lead_intelligence/leads/*`, writes `external_research_report.md`, and updates `external_research_status.json`.
 
 ## Operational Invariants
 

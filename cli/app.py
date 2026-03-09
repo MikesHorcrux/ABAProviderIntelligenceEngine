@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+from cli.agent_runtime_ops import run_agent_external_research
 from cli.control import run_control_apply, run_control_show
 from cli.doctor import run_doctor
 from cli.errors import ConfigError, ExitCode, UsageError, classify_exception
@@ -134,6 +135,14 @@ def make_parser() -> argparse.ArgumentParser:
 
     export = sub.add_parser("export", help="Export outreach, intelligence, research, agent research, new leads, signals, or quality outputs.")
     export.add_argument("--kind", default="all", choices=["all", "outreach", "intelligence", "research", "agent-research", "new", "signals", "quality"])
+    
+    agent_external = sub.add_parser(
+        "agent:external-research",
+        help="Run provider-backed external research generation for lead packages.",
+    )
+    agent_external.add_argument("--out-dir", default=str(Path(__file__).resolve().parents[1] / "out"))
+    agent_external.add_argument("--config-path", default=str(Path(__file__).resolve().parents[1] / "config" / "agent_runtime.json"))
+    agent_external.add_argument("--limit", type=int, default=0)
     export.add_argument("--tier", default="A")
     export.add_argument("--limit", type=int, default=200)
     export.add_argument("--research-limit", type=int, default=200)
@@ -249,6 +258,8 @@ def _dispatch(args) -> dict[str, object]:
         return run_search(db_path=args.db, query=args.query, preset=args.preset, limit=args.limit)
     if command == "export":
         return execute_export(args)
+    if command == "agent:external-research":
+        return run_agent_external_research(out_dir=args.out_dir, config_path=args.config_path, limit=args.limit)
     if command == "export:outreach":
         args.kind = "outreach"
         args.research_limit = 0

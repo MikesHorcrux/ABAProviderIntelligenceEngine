@@ -25,9 +25,12 @@ Added components:
 
 ## Current Operational Behavior
 
-- Runtime provider calls are still stubbed.
-- No existing pipeline stage depends on this runtime yet.
-- Existing outputs remain backward compatible.
+- Runtime provider calls are wired for:
+  - `codex_auth` via local `codex exec`
+  - `openai_api` via Responses API (when `OPENAI_API_KEY` is set)
+  - `clawbot` remains a placeholder adapter
+- Existing pipeline stages remain backward compatible.
+- External-research execution is available via `agent:external-research` command.
 
 ## Integration Roadmap (Next Step)
 
