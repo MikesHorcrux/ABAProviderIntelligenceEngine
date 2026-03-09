@@ -50,16 +50,24 @@ def test_score_qa_and_export_generate_provider_outputs() -> None:
 
         records_path = Path(str(report["records_csv"]))
         review_path = Path(str(report["review_queue_csv"]))
+        sales_path = Path(str(report["sales_report_csv"]))
         assert records_path.exists()
         assert review_path.exists()
+        assert sales_path.exists()
         assert Path(str(report["profiles_dir"])) .exists()
+        assert Path(str(report["outreach_dir"])).exists()
         with records_path.open(newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))
+        with sales_path.open(newline="", encoding="utf-8") as handle:
+            sales_rows = list(csv.DictReader(handle))
         assert len(rows) == 1
+        assert len(sales_rows) == 1
         assert rows[0]["provider_name"] == "Jane Smith"
         assert rows[0]["prescriptive_authority"] == "no"
         assert rows[0]["diagnoses_asd"] == "yes"
         assert rows[0]["diagnoses_adhd"] == "yes"
+        assert rows[0]["outreach_ready"] == "1"
+        assert sales_rows[0]["target_buyer"] == "clinical director or practice owner"
 
 
 def main() -> None:

@@ -26,17 +26,26 @@ def _missing_critical_evidence(con: sqlite3.Connection, record_id: str) -> list[
     return missing
 
 
+def _has_public_contact(*, phone: str, website: str, intake_url: str) -> bool:
+    return bool((phone or "").strip() or (website or "").strip() or (intake_url or "").strip())
+
+
 def run_qa(con: sqlite3.Connection) -> dict[str, int]:
     now = utcnow_iso()
     rows = con.execute(
         """
-        SELECT record_id, provider_name_snapshot, practice_name_snapshot, prescriptive_authority, record_confidence
-        FROM provider_practice_records
+        SELECT pr.record_id, pr.provider_name_snapshot, pr.practice_name_snapshot, pr.prescriptive_authority,
+               pr.record_confidence, pr.diagnoses_asd, pr.diagnoses_adhd, pr.license_status, pr.outreach_fit_score,
+               pt.website, pt.intake_url, COALESCE(pl.phone, pt.phone, '') AS phone
+        FROM provider_practice_records pr
+        INNER JOIN practices pt ON pt.practice_id = pr.practice_id
+        INNER JOIN practice_locations pl ON pl.location_id = pr.location_id
         """
     ).fetchall()
     approved = 0
     queued = 0
     contradictions = 0
+    outreach_ready = 0
     for row in rows:
         conflict_notes: list[str] = []
         for field in CRITICAL_FIELDS:
@@ -119,6 +128,7 @@ def run_qa(con: sqlite3.Connection) -> dict[str, int]:
                 UPDATE provider_practice_records
                 SET review_status='queued',
                     export_status='blocked',
+                    outreach_ready=0,
                     blocked_reason=?,
                     conflict_note=?,
                     record_confidence=?,
@@ -130,20 +140,34 @@ def run_qa(con: sqlite3.Connection) -> dict[str, int]:
             queued += 1
             continue
 
+        outreach_ready_flag = int(
+            record_confidence >= 0.70
+            and float(row["outreach_fit_score"] or 0.0) >= 0.70
+            and row["license_status"] == "active"
+            and (row["diagnoses_asd"] == "yes" or row["diagnoses_adhd"] == "yes")
+            and _has_public_contact(phone=row["phone"], website=row["website"], intake_url=row["intake_url"])
+        )
         con.execute(
             """
             UPDATE provider_practice_records
             SET review_status='ready',
                 export_status='approved',
+                outreach_ready=?,
                 blocked_reason='',
                 conflict_note=?,
                 record_confidence=?,
                 updated_at=?
             WHERE record_id=?
             """,
-            ("; ".join(conflict_notes), record_confidence, now, row["record_id"]),
+            (outreach_ready_flag, "; ".join(conflict_notes), record_confidence, now, row["record_id"]),
         )
         approved += 1
+        outreach_ready += outreach_ready_flag
 
     con.commit()
-    return {"approved_records": approved, "queued_records": queued, "contradictions": contradictions}
+    return {
+        "approved_records": approved,
+        "queued_records": queued,
+        "contradictions": contradictions,
+        "outreach_ready_records": outreach_ready,
+    }

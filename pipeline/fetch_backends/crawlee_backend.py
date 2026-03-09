@@ -785,7 +785,7 @@ def _spawn_browser_worker(payload_path: Path, result_path: Path) -> tuple[int, s
 
 def _run_browser_worker_subprocess(state: SeedCrawlState, initial_requests: list[QueueItem]) -> dict[str, Any]:
     payload = _browser_worker_payload(state, initial_requests)
-    with tempfile.TemporaryDirectory(prefix="cannaradar-browser-worker-") as td:
+    with tempfile.TemporaryDirectory(prefix="provider-intel-browser-worker-") as td:
         payload_path = Path(td) / "payload.json"
         result_path = Path(td) / "result.json"
         payload_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -938,7 +938,7 @@ async def _run_http_crawl(state: SeedCrawlState, initial_requests: list[QueueIte
         return
 
     state.persist_runtime(force=True, status="running")
-    request_queue = await RequestQueue.open(name=_storage_name("cannaradar-http", state.recorder.job_pk))
+    request_queue = await RequestQueue.open(name=_storage_name("provider-intel-http", state.recorder.job_pk))
     crawler = HttpCrawler(
         request_manager=request_queue,
         max_requests_per_crawl=min(state.remaining_total_budget, len(initial_requests) + (state.crawl_pages * 2)),
@@ -1080,7 +1080,7 @@ async def _run_browser_crawl(state: SeedCrawlState, initial_requests: list[Queue
         return
 
     state.persist_runtime(force=True, status="running")
-    request_queue = await RequestQueue.open(name=_storage_name("cannaradar-browser", state.recorder.job_pk))
+    request_queue = await RequestQueue.open(name=_storage_name("provider-intel-browser", state.recorder.job_pk))
     crawler = PlaywrightCrawler(
         request_manager=request_queue,
         browser_type=state.cfg.crawlee_browser_type,

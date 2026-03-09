@@ -17,9 +17,10 @@ def _bundle(con: sqlite3.Connection, record_id: str) -> dict[str, object]:
     record = con.execute(
         """
         SELECT pr.*, pl.city, pl.state AS location_state, pl.metro, pl.phone AS location_phone,
-               p.provider_name, p.credentials, pr.practice_name_snapshot AS practice_name
+               p.provider_name, p.credentials, pt.website, pt.intake_url, pr.practice_name_snapshot AS practice_name
         FROM provider_practice_records pr
         INNER JOIN providers p ON p.provider_id = pr.provider_id
+        INNER JOIN practices pt ON pt.practice_id = pr.practice_id
         INNER JOIN practice_locations pl ON pl.location_id = pr.location_id
         WHERE pr.record_id=?
         """,
@@ -32,6 +33,127 @@ def _bundle(con: sqlite3.Connection, record_id: str) -> dict[str, object]:
         "evidence": evidence,
         "contradictions": contradictions,
     }
+
+
+def _diagnostic_focus(record: dict[str, object]) -> str:
+    asd = str(record.get("diagnoses_asd") or "unclear")
+    adhd = str(record.get("diagnoses_adhd") or "unclear")
+    if asd == "yes" and adhd == "yes":
+        return "ASD and ADHD diagnostic services"
+    if asd == "yes":
+        return "autism diagnostic services"
+    if adhd == "yes":
+        return "ADHD diagnostic services"
+    return "developmental and behavioral evaluation services"
+
+
+def _target_buyer(record: dict[str, object]) -> str:
+    credentials = str(record.get("credentials") or "").lower()
+    if "md" in credentials or "do" in credentials:
+        return "medical director or practice owner"
+    if "psyd" in credentials or "phd" in credentials:
+        return "clinical director or practice owner"
+    if "apn" in credentials or "np" in credentials or "pa" in credentials:
+        return "clinical lead or practice administrator"
+    return "practice administrator or intake lead"
+
+
+def _outreach_angle(record: dict[str, object]) -> str:
+    focus = _diagnostic_focus(record)
+    telehealth = str(record.get("telehealth") or "unknown")
+    referral = str(record.get("referral_requirements") or "").strip() or "unknown"
+    if telehealth == "yes":
+        return f"Lead with referral capture and intake efficiency for {focus}, including telehealth-enabled scheduling capacity."
+    if referral != "unknown":
+        return f"Lead with faster referral routing and intake conversion for {focus}, since the practice already publishes referral requirements."
+    return f"Lead with diagnostic demand capture, intake conversion, and referral visibility for {focus}."
+
+
+def _outreach_opener(record: dict[str, object]) -> str:
+    practice = str(record.get("practice_name") or record.get("practice_name_snapshot") or "").strip()
+    city = str(record.get("city") or "").strip()
+    focus = _diagnostic_focus(record)
+    locale = f" in {city}" if city else ""
+    return f"{practice}{locale} publicly advertises {focus}; open with referral demand, intake throughput, and evaluation booking friction."
+
+
+def _evidence_summary(bundle: dict[str, object]) -> str:
+    evidence = list(bundle.get("evidence") or [])
+    preferred_fields = ("diagnoses_asd", "diagnoses_adhd", "license_status", "prescriptive_authority")
+    snippets: list[str] = []
+    for field in preferred_fields:
+        item = next((entry for entry in evidence if str(entry.get("field_name") or entry.get("field") or "") == field), None)
+        if not item:
+            continue
+        quote = str(item.get("quote") or "").strip()
+        if quote:
+            snippets.append(quote)
+    return " | ".join(snippets[:3])
+
+
+def _sales_bundle_row(bundle: dict[str, object]) -> dict[str, object]:
+    record = dict(bundle.get("record") or {})
+    evidence = list(bundle.get("evidence") or [])
+    source_urls = sorted({str(item.get("source_url") or "") for item in evidence if str(item.get("source_url") or "")})
+    return {
+        "record_id": record.get("record_id", ""),
+        "provider_name": record.get("provider_name", ""),
+        "credentials": record.get("credentials", ""),
+        "practice_name": record.get("practice_name", ""),
+        "city": record.get("city", ""),
+        "state": record.get("location_state", ""),
+        "metro": record.get("metro", ""),
+        "phone": record.get("location_phone", ""),
+        "website": record.get("website", ""),
+        "intake_url": record.get("intake_url", ""),
+        "diagnoses_asd": record.get("diagnoses_asd", "unclear"),
+        "diagnoses_adhd": record.get("diagnoses_adhd", "unclear"),
+        "license_status": record.get("license_status", "unknown"),
+        "prescriptive_authority": record.get("prescriptive_authority", "unknown"),
+        "record_confidence": record.get("record_confidence", 0.0),
+        "outreach_fit_score": record.get("outreach_fit_score", 0.0),
+        "target_buyer": _target_buyer(record),
+        "outreach_angle": _outreach_angle(record),
+        "opener": _outreach_opener(record),
+        "evidence_summary": _evidence_summary(bundle),
+        "source_urls": source_urls,
+    }
+
+
+def _sales_markdown(bundle: dict[str, object]) -> str:
+    row = _sales_bundle_row(bundle)
+    lines = [
+        f"# Sales Brief - {row['provider_name']} / {row['practice_name']}",
+        "",
+        "## Target",
+        f"- Buyer: {row['target_buyer']}",
+        f"- Phone: {row['phone'] or 'unknown'}",
+        f"- Website: {row['website'] or 'unknown'}",
+        f"- Intake URL: {row['intake_url'] or 'unknown'}",
+        "",
+        "## Why This Record Matters",
+        f"- Diagnostic focus: {_diagnostic_focus(dict(bundle.get('record') or {}))}",
+        f"- License status: {row['license_status']}",
+        f"- Prescribing capability: {row['prescriptive_authority']}",
+        f"- Record confidence: {row['record_confidence']}",
+        f"- Outreach fit score: {row['outreach_fit_score']}",
+        "",
+        "## Recommended Angle",
+        f"- {row['outreach_angle']}",
+        "",
+        "## Suggested Opener",
+        f"- {row['opener']}",
+        "",
+        "## Evidence Summary",
+        f"- {row['evidence_summary'] or 'See cited evidence bundle.'}",
+        "",
+        "## Evidence Links",
+    ]
+    for url in row["source_urls"]:
+        lines.append(f"- {url}")
+    if not row["source_urls"]:
+        lines.append("- No evidence links captured.")
+    return "\n".join(lines).strip() + "\n"
 
 
 def _markdown_profile(bundle: dict[str, object]) -> str:
@@ -175,10 +297,13 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
     records_path = root / f"provider_records_{run_id}.csv"
     json_path = root / f"provider_records_{run_id}.json"
     review_path = root / f"review_queue_{run_id}.csv"
+    sales_path = root / f"sales_report_{run_id}.csv"
     profiles_dir = root / "profiles"
     evidence_dir = root / "evidence"
+    outreach_dir = root / "outreach"
     profiles_dir.mkdir(parents=True, exist_ok=True)
     evidence_dir.mkdir(parents=True, exist_ok=True)
+    outreach_dir.mkdir(parents=True, exist_ok=True)
 
     approved_rows = con.execute(
         """
@@ -186,13 +311,14 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
                pr.practice_name_snapshot AS practice_name, pl.city, pl.state, pl.metro, pl.phone, pt.website, pt.intake_url,
                pr.diagnoses_asd, pr.diagnoses_adhd, pr.prescriptive_authority, pr.prescriptive_basis, pr.age_groups_json,
                pr.telehealth, pr.insurance_notes, pr.waitlist_notes, pr.referral_requirements, pr.source_urls_json,
-               pr.field_confidence_json, pr.record_confidence, pr.last_verified_at
+               pr.field_confidence_json, pr.record_confidence, pr.outreach_fit_score, pr.outreach_ready, pr.outreach_reasons_json,
+               pr.last_verified_at
         FROM provider_practice_records pr
         INNER JOIN providers p ON p.provider_id = pr.provider_id
         INNER JOIN practices pt ON pt.practice_id = pr.practice_id
         INNER JOIN practice_locations pl ON pl.location_id = pr.location_id
         WHERE pr.export_status='approved'
-        ORDER BY pr.record_confidence DESC, p.provider_name ASC
+        ORDER BY pr.outreach_fit_score DESC, pr.record_confidence DESC, p.provider_name ASC
         LIMIT ?
         """,
         (limit,),
@@ -225,12 +351,16 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
         "source_urls",
         "field_confidence",
         "record_confidence",
+        "outreach_fit_score",
+        "outreach_ready",
+        "outreach_reasons",
         "last_verified_at",
     ]
     export_rows: list[dict[str, object]] = []
     for row in approved_rows:
         source_urls = json.loads(row["source_urls_json"] or "[]")
         field_confidence = json.loads(row["field_confidence_json"] or "{}")
+        outreach_reasons = json.loads(row["outreach_reasons_json"] or "[]")
         export_rows.append(
             {
                 "provider_id": row["record_id"],
@@ -259,6 +389,9 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
                 "source_urls": source_urls,
                 "field_confidence": field_confidence,
                 "record_confidence": row["record_confidence"],
+                "outreach_fit_score": row["outreach_fit_score"],
+                "outreach_ready": int(row["outreach_ready"] or 0),
+                "outreach_reasons": outreach_reasons,
                 "last_verified_at": row["last_verified_at"],
             }
         )
@@ -271,10 +404,12 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
             flattened["age_groups"] = json.dumps(flattened["age_groups"])
             flattened["source_urls"] = json.dumps(flattened["source_urls"])
             flattened["field_confidence"] = json.dumps(flattened["field_confidence"], sort_keys=True)
+            flattened["outreach_reasons"] = json.dumps(flattened["outreach_reasons"], sort_keys=True)
             writer.writerow(flattened)
 
     json_path.write_text(json.dumps(export_rows, indent=2, default=str), encoding="utf-8")
 
+    sales_rows: list[dict[str, object]] = []
     for row in approved_rows:
         bundle = _bundle(con, row["record_id"])
         slug = _safe_slug(f"{row['provider_name']}-{row['practice_name']}")
@@ -287,6 +422,47 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
         markdown_path.write_text(markdown, encoding="utf-8")
         evidence_path.write_text(json.dumps(bundle, indent=2, default=str), encoding="utf-8")
         _write_pdf(markdown, pdf_path)
+        if int(row["outreach_ready"] or 0):
+            sales_row = _sales_bundle_row(bundle)
+            sales_rows.append(sales_row)
+            outreach_record_dir = outreach_dir / f"{row['record_id']}-{slug}"
+            outreach_record_dir.mkdir(parents=True, exist_ok=True)
+            sales_markdown_path = outreach_record_dir / "sales_brief.md"
+            sales_pdf_path = outreach_record_dir / "sales_brief.pdf"
+            sales_markdown = _sales_markdown(bundle)
+            sales_markdown_path.write_text(sales_markdown, encoding="utf-8")
+            _write_pdf(sales_markdown, sales_pdf_path)
+
+    sales_fieldnames = [
+        "record_id",
+        "provider_name",
+        "credentials",
+        "practice_name",
+        "city",
+        "state",
+        "metro",
+        "phone",
+        "website",
+        "intake_url",
+        "diagnoses_asd",
+        "diagnoses_adhd",
+        "license_status",
+        "prescriptive_authority",
+        "record_confidence",
+        "outreach_fit_score",
+        "target_buyer",
+        "outreach_angle",
+        "opener",
+        "evidence_summary",
+        "source_urls",
+    ]
+    with sales_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=sales_fieldnames)
+        writer.writeheader()
+        for row in sales_rows:
+            flattened = dict(row)
+            flattened["source_urls"] = json.dumps(flattened["source_urls"])
+            writer.writerow(flattened)
 
     review_rows = [
         dict(row)
@@ -310,8 +486,11 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
         "records_csv": str(records_path),
         "records_json": str(json_path),
         "review_queue_csv": str(review_path),
+        "sales_report_csv": str(sales_path),
         "profiles_dir": str(profiles_dir),
         "evidence_dir": str(evidence_dir),
+        "outreach_dir": str(outreach_dir),
         "record_count": len(export_rows),
+        "sales_count": len(sales_rows),
         "review_count": len(review_rows),
     }

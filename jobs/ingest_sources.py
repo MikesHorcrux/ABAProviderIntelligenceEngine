@@ -34,6 +34,13 @@ REQUIRED_TABLES = {
     "seed_telemetry",
     "crawl_results",
 }
+REQUIRED_COLUMNS = {
+    "provider_practice_records": {
+        "outreach_fit_score",
+        "outreach_ready",
+        "outreach_reasons_json",
+    },
+}
 
 
 def assert_schema_layout(con: sqlite3.Connection) -> None:
@@ -41,6 +48,11 @@ def assert_schema_layout(con: sqlite3.Connection) -> None:
     missing = REQUIRED_TABLES - tables
     if missing:
         raise SystemExit(f"Schema drift detected. Missing tables: {', '.join(sorted(missing))}")
+    for table_name, columns in REQUIRED_COLUMNS.items():
+        existing = {str(row[1]) for row in con.execute(f"PRAGMA table_info({table_name})")}
+        missing_columns = columns - existing
+        if missing_columns:
+            raise SystemExit(f"Schema drift detected. Missing columns on {table_name}: {', '.join(sorted(missing_columns))}")
 
 
 def assert_schema_migration(con: sqlite3.Connection) -> None:
@@ -59,7 +71,26 @@ def assert_schema_migration(con: sqlite3.Connection) -> None:
 
 
 def init_db(con: sqlite3.Connection) -> None:
+    tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "provider_practice_records" in tables:
+        provider_record_columns = {str(row[1]) for row in con.execute("PRAGMA table_info(provider_practice_records)")}
+        if "outreach_fit_score" not in provider_record_columns:
+            con.execute("ALTER TABLE provider_practice_records ADD COLUMN outreach_fit_score REAL NOT NULL DEFAULT 0.0")
+        if "outreach_ready" not in provider_record_columns:
+            con.execute("ALTER TABLE provider_practice_records ADD COLUMN outreach_ready INTEGER NOT NULL DEFAULT 0")
+        if "outreach_reasons_json" not in provider_record_columns:
+            con.execute("ALTER TABLE provider_practice_records ADD COLUMN outreach_reasons_json TEXT NOT NULL DEFAULT '[]'")
     con.executescript(SCHEMA_TEXT)
+    provider_record_columns = {str(row[1]) for row in con.execute("PRAGMA table_info(provider_practice_records)")}
+    if "outreach_fit_score" not in provider_record_columns:
+        con.execute("ALTER TABLE provider_practice_records ADD COLUMN outreach_fit_score REAL NOT NULL DEFAULT 0.0")
+    if "outreach_ready" not in provider_record_columns:
+        con.execute("ALTER TABLE provider_practice_records ADD COLUMN outreach_ready INTEGER NOT NULL DEFAULT 0")
+    if "outreach_reasons_json" not in provider_record_columns:
+        con.execute("ALTER TABLE provider_practice_records ADD COLUMN outreach_reasons_json TEXT NOT NULL DEFAULT '[]'")
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_provider_practice_records_outreach ON provider_practice_records(outreach_ready, outreach_fit_score)"
+    )
     con.execute(
         """
         INSERT OR REPLACE INTO schema_migrations

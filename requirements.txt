@@ -1,2 +1,2 @@
-# CannaRadar requires Python 3.11+.
+# Provider Intel requires Python 3.11+.
 crawlee[beautifulsoup,playwright]>=1.5,<2 ; python_version >= "3.11"

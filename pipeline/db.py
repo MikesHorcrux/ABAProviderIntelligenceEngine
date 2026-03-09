@@ -4,6 +4,8 @@ from pathlib import Path
 import sqlite3
 from typing import Optional
 
+from jobs.ingest_sources import init_db
+
 
 def connect_db(path: str | Path, schema_sql: str | Path | None = None) -> sqlite3.Connection:
     db_path = Path(path)
@@ -12,8 +14,7 @@ def connect_db(path: str | Path, schema_sql: str | Path | None = None) -> sqlite
     con.execute("PRAGMA foreign_keys = ON")
     con.row_factory = sqlite3.Row
     if schema_sql:
-        con.executescript(Path(schema_sql).read_text())
-        con.commit()
+        init_db(con)
     return con
 
 

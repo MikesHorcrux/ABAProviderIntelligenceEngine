@@ -53,6 +53,14 @@ PRESET_QUERIES = {
         ORDER BY c.created_at DESC
         LIMIT ?
     """,
+    "outreach-ready": """
+        SELECT provider_name_snapshot AS provider_name, practice_name_snapshot AS practice_name, outreach_fit_score,
+               record_confidence, diagnoses_asd, diagnoses_adhd, license_status
+        FROM provider_practice_records
+        WHERE outreach_ready=1
+        ORDER BY outreach_fit_score DESC, record_confidence DESC, provider_name_snapshot ASC
+        LIMIT ?
+    """,
 }
 
 
@@ -113,6 +121,7 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
         "practices": int(con.execute("SELECT COUNT(*) FROM practices").fetchone()[0]),
         "records": int(con.execute("SELECT COUNT(*) FROM provider_practice_records").fetchone()[0]),
         "approved_records": int(con.execute("SELECT COUNT(*) FROM provider_practice_records WHERE export_status='approved'").fetchone()[0]),
+        "outreach_ready_records": int(con.execute("SELECT COUNT(*) FROM provider_practice_records WHERE outreach_ready=1").fetchone()[0]),
         "review_queue": int(con.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0]),
         "contradictions": int(con.execute("SELECT COUNT(*) FROM contradictions").fetchone()[0]),
     }
@@ -133,8 +142,10 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
             "records_csv": latest_records or _file_snapshot(OUT_DIR / "missing.csv"),
             "records_json": _file_snapshot(next(iter(sorted(OUT_DIR.glob("provider_records_*.json"), key=lambda path: path.stat().st_mtime, reverse=True)), OUT_DIR / "missing.json")),
             "review_queue_csv": _file_snapshot(next(iter(sorted(OUT_DIR.glob("review_queue_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)), OUT_DIR / "missing_review.csv")),
+            "sales_report_csv": _file_snapshot(next(iter(sorted(OUT_DIR.glob("sales_report_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)), OUT_DIR / "missing_sales.csv")),
             "profiles_dir": _file_snapshot(OUT_DIR / "profiles"),
             "evidence_dir": _file_snapshot(OUT_DIR / "evidence"),
+            "outreach_dir": _file_snapshot(OUT_DIR / "outreach"),
         },
     }
 
@@ -157,11 +168,11 @@ def run_search(*, db_path: str, query: str | None, preset: str | None, limit: in
             for row in con.execute(
                 """
                 SELECT provider_name_snapshot AS provider_name, practice_name_snapshot AS practice_name,
-                       license_status, diagnoses_asd, diagnoses_adhd, prescriptive_authority, record_confidence
+                       license_status, diagnoses_asd, diagnoses_adhd, prescriptive_authority, record_confidence, outreach_fit_score, outreach_ready
                 FROM provider_practice_records
                 WHERE lower(provider_name_snapshot) LIKE ?
                    OR lower(practice_name_snapshot) LIKE ?
-                ORDER BY record_confidence DESC, provider_name_snapshot ASC
+                ORDER BY outreach_fit_score DESC, record_confidence DESC, provider_name_snapshot ASC
                 LIMIT ?
                 """,
                 (f"%{needle}%", f"%{needle}%", limit),

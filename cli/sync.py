@@ -162,7 +162,9 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
             "resolved": int(state["stages"]["resolve"]["details"].get("resolved_count", 0)),
             "approved": int(state["stages"]["qa"]["details"].get("approved_records", 0)),
             "queued": int(state["stages"]["qa"]["details"].get("queued_records", 0)),
+            "outreach_ready": int(state["stages"]["qa"]["details"].get("outreach_ready_records", 0)),
             "exported": int((report or {}).get("record_count", 0)),
+            "sales_exported": int((report or {}).get("sales_count", 0)),
         }
         checkpoint_path = save_run_state(state, checkpoint_dir)
         mark_run_completed(state, summary=summary, report=report)

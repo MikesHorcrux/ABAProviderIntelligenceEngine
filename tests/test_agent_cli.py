@@ -34,6 +34,7 @@ def _seed_demo_rows(db_path: Path) -> None:
     con.execute("INSERT INTO practices(practice_id, practice_name, website, intake_url, phone, fax, created_at, updated_at) VALUES ('prac_demo', 'Garden State Psychology Center', 'https://practice.example', 'https://practice.example/intake', '(973) 555-0112', '', ?, ?)", (now, now))
     con.execute("INSERT INTO practice_locations(location_id, practice_id, address_1, city, state, zip, metro, phone, telehealth, created_at, updated_at) VALUES ('loc_demo', 'prac_demo', '', 'Newark', 'NJ', '', 'Newark', '(973) 555-0112', 'yes', ?, ?)", (now, now))
     con.execute("INSERT INTO provider_practice_records(record_id, provider_id, practice_id, location_id, provider_name_snapshot, practice_name_snapshot, npi, license_state, license_type, license_status, diagnoses_asd, diagnoses_adhd, prescriptive_authority, prescriptive_basis, age_groups_json, telehealth, insurance_notes, waitlist_notes, referral_requirements, source_urls_json, field_confidence_json, record_confidence, conflict_note, review_status, export_status, blocked_reason, last_verified_at, created_at, updated_at) VALUES ('rec_demo', 'prov_demo', 'prac_demo', 'loc_demo', 'Jane Smith', 'Garden State Psychology Center', '', 'NJ', 'psychologist', 'active', 'yes', 'yes', 'no', 'Psychologists in New Jersey do not prescribe.', '[\"child\"]', 'yes', 'Accepts major insurance', '', 'Referral preferred', '[\"https://practice.example/providers\"]', '{\"diagnoses_asd\":0.8,\"diagnoses_adhd\":0.8,\"license_status\":0.95,\"prescriptive_authority\":0.95}', 0.875, '', 'ready', 'approved', '', ?, ?, ?)", (now, now, now))
+    con.execute("UPDATE provider_practice_records SET outreach_fit_score=0.91, outreach_ready=1, outreach_reasons_json='[\"explicit_asd_diagnostic_signal\",\"active_license\",\"public_contact_channel\"]' WHERE record_id='rec_demo'")
     con.execute("INSERT INTO field_evidence(evidence_id, record_id, field_name, field_value, quote, source_url, source_document_id, source_tier, captured_at) VALUES ('ev_demo_asd', 'rec_demo', 'diagnoses_asd', 'yes', 'autism diagnostic evaluations', 'https://practice.example/providers', 'src_demo', 'C', ?)", (now,))
     con.execute("INSERT INTO field_evidence(evidence_id, record_id, field_name, field_value, quote, source_url, source_document_id, source_tier, captured_at) VALUES ('ev_demo_adhd', 'rec_demo', 'diagnoses_adhd', 'yes', 'ADHD assessment', 'https://practice.example/providers', 'src_demo', 'C', ?)", (now,))
     con.execute("INSERT INTO field_evidence(evidence_id, record_id, field_name, field_value, quote, source_url, source_document_id, source_tier, captured_at) VALUES ('ev_demo_lic', 'rec_demo', 'license_status', 'active', 'License status: active', 'https://www.njconsumeraffairs.gov/psy/Pages/default.aspx', 'src_demo', 'A', ?)", (now,))
@@ -73,6 +74,11 @@ def test_init_doctor_sql_search_status_and_export() -> None:
         assert payload["data"]["row_count"] == 1
         assert payload["data"]["rows"][0]["seed_domain"] == "blocked.example"
 
+        code, payload = _run_cli(["--json", "--db", str(db_path), "search", "--preset", "outreach-ready"])
+        assert code == 0
+        assert payload["data"]["row_count"] == 1
+        assert payload["data"]["rows"][0]["provider_name"] == "Jane Smith"
+
         state = create_run_state(
             run_id="demo-run",
             command="sync",
@@ -88,11 +94,13 @@ def test_init_doctor_sql_search_status_and_export() -> None:
         code, payload = _run_cli(["--json", "--db", str(db_path), "status", "--run-id", "demo-run", "--checkpoint-dir", str(checkpoint_dir)])
         assert code == 0
         assert payload["data"]["counts"]["records"] == 1
+        assert payload["data"]["counts"]["outreach_ready_records"] == 1
 
         code, payload = _run_cli(["--json", "--db", str(db_path), "export", "--limit", "10"])
         assert code == 0
         assert payload["data"]["record_count"] == 1
         assert Path(str(payload["data"]["records_csv"])).exists()
+        assert Path(str(payload["data"]["sales_report_csv"])).exists()
 
 
 def main() -> None:

@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cannaradar.local/schemas/cli/v1/control.json",
-  "title": "CannaRadar control output",
+  "$id": "https://provider-intel.local/schemas/cli/v1/control.json",
+  "title": "Provider Intel control output",
   "type": "object",
   "required": ["schema_version", "command", "ok", "data"],
   "properties": {
-    "schema_version": { "const": "cli.v1" },
+    "schema_version": { "const": "provider_intel.cli.v1" },
     "command": { "const": "control" },
     "ok": { "type": "boolean" },
     "message": { "type": "string" },

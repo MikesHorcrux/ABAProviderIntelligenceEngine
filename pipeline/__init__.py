@@ -1,2 +1,1 @@
-"""CannaRadar production pipeline package."""
-
+"""Provider intelligence pipeline package."""

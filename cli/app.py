@@ -62,7 +62,7 @@ def make_parser() -> argparse.ArgumentParser:
 
     search = sub.add_parser("search", help="Query local provider intelligence state or curated diagnostics presets.")
     search.add_argument("query", nargs="?", default=None)
-    search.add_argument("--preset", choices=["failed-domains", "blocked-domains", "low-confidence-records", "review-queue", "contradictions"])
+    search.add_argument("--preset", choices=["failed-domains", "blocked-domains", "low-confidence-records", "review-queue", "contradictions", "outreach-ready"])
     search.add_argument("--limit", type=int, default=20)
 
     status = sub.add_parser("status", help="Summarize last manifest, checkpoint state, DB counts, and output snapshots.")

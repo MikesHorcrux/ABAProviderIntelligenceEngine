@@ -36,7 +36,7 @@ class JsonFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in _STANDARD_LOG_RECORD_KEYS:
                 continue
-            if key.startswith("_cannaradar_"):
+            if key.startswith("_provider_intel_"):
                 continue
             payload[key] = value
         if record.exc_info:
@@ -45,16 +45,16 @@ class JsonFormatter(logging.Formatter):
 
 
 def build_logger(job_id: str, stage: str) -> logging.Logger:
-    logger = logging.getLogger(f"cannaradar.{job_id}.{stage}")
-    if getattr(logger, "_cannaradar_ready", False):
+    logger = logging.getLogger(f"provider_intel.{job_id}.{stage}")
+    if getattr(logger, "_provider_intel_ready", False):
         return logger
     logger.setLevel(logging.INFO)
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     logger.addHandler(handler)
-    logger._cannaradar_ready = True
-    logger._cannaradar_job_id = job_id
-    logger._cannaradar_stage = stage
+    logger._provider_intel_ready = True
+    logger._provider_intel_job_id = job_id
+    logger._provider_intel_stage = stage
     return logger
 
 

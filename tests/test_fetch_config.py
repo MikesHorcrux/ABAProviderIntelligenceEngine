@@ -28,7 +28,7 @@ def _restore_env(previous: dict[str, str | None]) -> None:
 
 
 def test_load_crawl_config_defaults_include_crawlee_settings() -> None:
-    cfg = load_crawl_config("/tmp/does-not-exist-cannaradar-config.json")
+    cfg = load_crawl_config("/tmp/does-not-exist-provider-intel-config.json")
     assert cfg.crawlee_headless is True
     assert cfg.crawlee_browser_type == "chromium"
     assert cfg.crawlee_proxy_urls == []

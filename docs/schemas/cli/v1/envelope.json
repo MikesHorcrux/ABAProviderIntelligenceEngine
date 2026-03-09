@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cannaradar.local/schemas/cli/v1/envelope.json",
-  "title": "CannaRadar CLI Envelope",
+  "$id": "https://provider-intel.local/schemas/cli/v1/envelope.json",
+  "title": "Provider Intel CLI Envelope",
   "type": "object",
   "required": ["schema_version", "command", "ok"],
   "properties": {
     "schema_version": {
-      "const": "cli.v1"
+      "const": "provider_intel.cli.v1"
     },
     "command": {
       "type": "string"

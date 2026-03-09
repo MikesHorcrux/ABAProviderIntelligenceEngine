@@ -1,229 +1,81 @@
-# CannaRadar
+# Provider Intelligence Engine
 
-> Private, local-first crawler and lead-intelligence system for cannabis outbound.
+> New Jersey-first provider intelligence for ASD/ADHD diagnosis and prescribing capability.
 
-CannaRadar turns seed domains into scored, evidence-backed, outreach-ready leads. It crawls public sites, extracts contact and buyer signals, resolves them into a canonical SQLite model, generates research briefs, and emits deterministic exports that an operator or agent can actually use.
+This repository runs a local-first, agent-operable crawl pipeline that finds and evaluates providers and practices that may assess or diagnose autism and ADHD. The system is built for evidence-backed provider intelligence, not lead generation.
 
-## At a Glance
+## Current Surface
 
-| Area | Current shape |
-| --- | --- |
-| Runtime model | Python 3.11 CLI |
-| Orchestration | `cannaradar_cli.py` -> `cli/app.py` -> `cli/sync.py` |
-| Core engine | `pipeline/pipeline.py:PipelineRunner` |
-| Crawl layer | Crawlee HTTP-first + isolated Playwright browser worker |
-| Persistence | SQLite + JSON run/checkpoint state |
-| Outputs | CSV exports + quality/change artifacts |
-| Operating mode | agent-operable, resumable, batch-first |
+- Canonical CLI: `provider_intel_cli.py`
+- Runtime: Python 3.11
+- Persistence: SQLite in `data/provider_intel_v1.db`
+- State: checkpoint/control files under `data/state/agent_runs/`
+- Outputs: `out/provider_intel/`
 
-## Why This Exists
+## Pipeline
 
-The point of this repo is not “generic crawling.” The point is to create a reliable internal machine for:
+1. `seed_ingest`
+2. `crawl`
+3. `extract`
+4. `resolve`
+5. `score`
+6. `qa`
+7. `export`
 
-- finding cannabis retail opportunities
-- extracting public proof and contact signals
-- ranking which locations matter first
-- producing stable handoff artifacts for outbound work
-- letting an agent operate the system without constant human babysitting
+The pipeline prefers evidence-backed records over volume. Critical fields must be source-backed or the record is routed to review.
 
-This is a private operating system for lead generation, not a public-facing product surface.
-
-## One-Screen Mental Model
-
-1. Seeds enter from `seeds.csv`, `discoveries.csv`, and optional inbound discovery drops.
-2. The CLI starts a checkpointed run and builds a seed plan.
-3. Fetch crawls each seed domain, records `crawl_jobs` / `crawl_results`, and self-heals around junk paths, blocks, and browser failures.
-4. Enrich parses raw pages, resolves canonical locations, writes evidence, contacts, and domains.
-5. Score ranks locations.
-6. Research builds deterministic lead briefs and gap summaries.
-7. Export emits outreach, research, signal, and quality artifacts.
-8. Status, search, sql, and control expose live and historical state for operators and agents.
-
-## System Shape
-
-```mermaid
-flowchart TD
-    Seeds["seeds.csv / discoveries.csv / inbound discoveries"] --> CLI["cannaradar_cli.py"]
-    CLI --> App["cli/app.py"]
-    App --> Sync["cli/sync.py"]
-    Sync --> RunState["run_<id>.json"]
-    Sync --> RunControl["control_<id>.json"]
-    Sync --> Runner["pipeline/pipeline.py: PipelineRunner"]
-
-    Runner --> Discovery["discovery"]
-    Runner --> Fetch["fetch"]
-    Runner --> Enrich["enrich (parse + resolve + enrich)"]
-    Runner --> Score["score"]
-    Runner --> Research["research"]
-    Runner --> Export["export"]
-
-    Fetch --> Crawlee["pipeline/fetch_backends/crawlee_backend.py"]
-    Crawlee --> BrowserWorker["browser_worker.py"]
-    Discovery --> DB[(SQLite)]
-    Fetch --> DB
-    Enrich --> DB
-    Score --> DB
-    Research --> DB
-    Export --> Out["out/*.csv + out/*.json"]
-
-    Query["status / search / sql / control"] --> DB
-    Query --> RunState
-    Query --> RunControl
-```
-
-## The Important Brains
-
-- **Run orchestration**: `cli/sync.py` and `pipeline/pipeline.py`
-  These decide what runs, in what order, and how resume/failure flows behave.
-- **Crawl behavior**: `pipeline/fetch_backends/crawlee_backend.py`
-  This is where the system decides what to fetch, what to skip, when to escalate to browser mode, and how to survive bad domains.
-- **Extraction and canonicalization**: `pipeline/stages/parse.py` and `pipeline/stages/resolve.py`
-  These turn raw HTML into structured business facts.
-- **Lead judgment**: `pipeline/stages/score.py`
-  This is the ranking brain.
-- **Follow-up guidance**: `pipeline/stages/research.py`
-  This builds the agent-ready lead brief and gap summary.
-- **Agent-operability**: `pipeline/run_state.py`, `pipeline/run_control.py`, `cli/query.py`, `cli/control.py`
-  These are what make the system resumable, inspectable, and steerable.
-
-## How It Runs
-
-### Canonical workflow
+## Canonical Commands
 
 ```bash
-python3.11 cannaradar_cli.py init --json
-python3.11 cannaradar_cli.py doctor --json
-python3.11 cannaradar_cli.py sync --json --crawl-mode growth --max 50
-python3.11 cannaradar_cli.py status --json
-python3.11 cannaradar_cli.py export --json --kind all
+python3.11 provider_intel_cli.py init --json
+python3.11 provider_intel_cli.py doctor --json
+python3.11 provider_intel_cli.py sync --json --max 25 --limit 100
+python3.11 provider_intel_cli.py status --json
+python3.11 provider_intel_cli.py export --json --limit 100
 ```
 
-### Resume workflow
+Resume a run:
 
 ```bash
-python3.11 cannaradar_cli.py status --json
-python3.11 cannaradar_cli.py sync --json --resume latest
+python3.11 provider_intel_cli.py status --json
+python3.11 provider_intel_cli.py sync --json --resume latest
 ```
 
-### Continuous monitor loop
+Useful diagnostics:
 
 ```bash
-python3.11 cannaradar_cli.py tail --json --crawl-mode monitor --interval-seconds 300
+python3.11 provider_intel_cli.py search --json --preset failed-domains
+python3.11 provider_intel_cli.py search --json --preset blocked-domains
+python3.11 provider_intel_cli.py search --json --preset outreach-ready
+python3.11 provider_intel_cli.py search --json --preset review-queue
+python3.11 provider_intel_cli.py search --json --preset contradictions
 ```
 
-### Scheduled wrapper
+## Outputs
 
-```bash
-./run_v4.sh
-```
+- `out/provider_intel/provider_records_<run_id>.csv`
+- `out/provider_intel/provider_records_<run_id>.json`
+- `out/provider_intel/sales_report_<run_id>.csv`
+- `out/provider_intel/review_queue_<run_id>.csv`
+- `out/provider_intel/profiles/<record_id>/profile.md`
+- `out/provider_intel/profiles/<record_id>/profile.pdf`
+- `out/provider_intel/evidence/<record_id>.json`
+- `out/provider_intel/outreach/<record_id>/sales_brief.md`
+- `out/provider_intel/outreach/<record_id>/sales_brief.pdf`
 
-`run_v4.sh` is the safe shell wrapper. It adds locking, optional canonical ingest, export-change diffing, and manifest post-processing around the canonical CLI.
+## Scope
 
-## Fast Start
+- Pilot geography is New Jersey.
+- Canonical export unit is one provider-practice-state affiliation record.
+- Browser-capable crawling remains available for JS-heavy sources.
+- Low-confidence and practice-only records are queued for review instead of exported as truth.
 
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-playwright install chromium
-
-PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py
-python3.11 cannaradar_cli.py init --json
-python3.11 cannaradar_cli.py doctor --json
-python3.11 cannaradar_cli.py sync --json --seeds seeds.csv --max 25 --crawl-mode growth
-python3.11 cannaradar_cli.py status --json
-```
-
-## Command Surface
-
-### Primary commands
-
-| Command | Purpose |
-| --- | --- |
-| `init` | bootstrap config, DB, state directories, and policy files |
-| `doctor` | preflight checks for runtime, schema, config, paths, and browser availability |
-| `sync` | run the full checkpointed pipeline |
-| `tail` | repeat `sync` on an interval for monitor workflows |
-| `status` | summarize manifest, DB state, checkpoint state, outputs, and recent failures |
-| `control` | inspect or apply bounded live interventions |
-| `search` | query curated diagnostics and local lead state |
-| `sql` | read-only SQL surface over local SQLite |
-| `export` | generate outreach, intelligence, research, signal, and quality outputs |
-
-### Useful control examples
-
-```bash
-python3.11 cannaradar_cli.py control --json --run-id latest show
-python3.11 cannaradar_cli.py control --json --run-id latest quarantine-seed --domain bad.example --reason dns_failure
-python3.11 cannaradar_cli.py control --json --run-id latest suppress-prefix --domain example.com --prefix /blog/ --reason low_value_path
-python3.11 cannaradar_cli.py control --json --run-id latest cap-domain --domain example.com --max-pages 2 --reason noisy_domain
-```
-
-## What Comes Out
-
-Primary runtime outputs:
-
-- `out/outreach_ready_<run_id>.csv`
-- `out/outreach_dispensary_100.csv`
-- `out/lead_intelligence/lead_intelligence_index.csv`
-- `out/lead_intelligence/lead_intelligence_table.md`
-- `out/lead_intelligence/lead_intelligence_manifest.json`
-- `out/lead_intelligence/leads/<lead-id>-<company>/report.md`
-- `out/lead_intelligence/leads/<lead-id>-<company>/agent_research_prompt.md`
-- `out/research_queue.csv`
-- `out/agent_research_queue.csv`
-- `out/new_leads_only.csv`
-- `out/callable_leads.csv`
-- `out/quality_report.json`
-- `data/state/last_run_manifest.json`
-- `data/state/agent_runs/run_<id>.json`
-- `data/state/agent_runs/control_<id>.json`
-
-The key promise is determinism: the pipeline writes stable files and stable machine-readable CLI envelopes so an operator or agent can reason about what happened without scraping console text.
-
-## Operational Invariants
-
-- Discovery is deduped by normalized `website + state`.
-- Fetch is public-web only, HTTP-first, and same-domain constrained by design.
-- Browser escalation is isolated so Playwright failures do not take down the main batch.
-- Resolution is deterministic; this repo does not auto-merge entities recklessly.
-- Scoring is explainable through `lead_scores` and `scoring_features`.
-- Research is deterministic synthesis over stored evidence, not a hidden LLM workflow.
-- Exports are contract-shaped and intended to remain stable.
-
-## Repo Landmarks
-
-| Area | What it owns |
-| --- | --- |
-| `cli/` | command contract, output envelopes, diagnostics, status/search/sql/control |
-| `pipeline/` | orchestration, fetch, parsing, resolution, scoring, research, exports |
-| `pipeline/fetch_backends/` | Crawlee runtime, browser worker, fetch persistence, policy loading |
-| `db/schema.sql` | canonical storage model |
-| `jobs/` | schema bootstrap, change diffing, outreach logging |
-| `docs/` | deep internal architecture and operator docs |
-| `run_v4.sh` | scheduled-run wrapper |
-
-## Read Next
+## Docs
 
 - [Internal docs index](./docs/README.md)
-- [Purpose and overview](./docs/01-purpose-and-overview.md)
-- [Architecture](./docs/02-architecture.md)
-- [Runtime flow](./docs/04-runtime-flow.md)
-- [State and lifecycle](./docs/10-state-and-lifecycle.md)
-- [Failure modes and recovery](./docs/11-failure-modes-and-recovery.md)
-- [How to modify the system](./docs/12-how-to-modify-the-system.md)
 - [Agent ops playbook](./docs/AGENT_OPS_PLAYBOOK.md)
 - [Runbook](./docs/RUNBOOK_V1.md)
 
-## Private Repo Notes
+## Legacy Note
 
-This repo is intentionally not positioned as a generic open-source crawler.
-
-What is valuable here is the combination of:
-
-- cannabis-specific signal extraction
-- lead prioritization rules
-- agent-operable run control
-- deterministic exports for outbound workflows
-
-Treat the README as an internal landing page, and use `docs/` for the full system mental model.
+The legacy CLI shim remains only as a redirect to `provider_intel_cli.py`.

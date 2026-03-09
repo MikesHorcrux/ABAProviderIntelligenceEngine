@@ -1,8 +1,8 @@
-# CannaRadar v1.5 Runbook
+# Provider Intel Runbook
 
 ## Purpose
 
-This runbook is the operator source of truth for running, validating, and recovering the v1.5 pipeline.
+Run, validate, and recover the provider-intelligence pipeline for the New Jersey ASD/ADHD pilot.
 
 ## Prerequisites
 
@@ -10,309 +10,70 @@ This runbook is the operator source of truth for running, validating, and recove
 - `pip install -r requirements.txt`
 - `playwright install chromium`
 - SQLite write access under `data/`
-- `crawler_config.json` present and valid JSON
-- `fetch_policies.json` present or referenced by `crawleeDomainPoliciesFile`
-- Seed source available (`--seeds` or environment override)
+- `crawler_config.json`
+- `seed_packs/nj/seed_pack.json`
+- `reference/prescriber_rules/nj.json`
 
-## Standard environment variables
-
-- `CANNARADAR_CRAWLER_CONFIG`: path to crawler config.
-- `CANNARADAR_SEED_FILE`: alternate seed file.
-- `CANNARADAR_DENYLIST`: comma-separated domains to skip.
-- `CANNARADAR_MAX_SEEDS`: optional run-time seed cap.
-- `CANNARADAR_RUN_CANONICAL_INGEST`: set `1` to run migration/bootstrap before crawl in `run_v4.sh`.
-- `CANNARADAR_CRAWLEE_PROXY_URLS`: comma-separated proxy URLs for Crawlee.
-- `CANNARADAR_CRAWLEE_HEADLESS`: `on|off` browser headless toggle.
-- `CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN`: per-domain Playwright cap.
-- `CANNARADAR_CRAWLEE_BROWSER_ISOLATION`: `inline|subprocess` browser execution mode.
-- `CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE`: alternate domain policy file path.
-
-## Agent-ops workflow
-
-Canonical command flow:
+## Canonical Workflow
 
 ```bash
-python3.11 cannaradar_cli.py init --json
-python3.11 cannaradar_cli.py doctor --json
-python3.11 cannaradar_cli.py sync --json --crawl-mode growth --max 50
-python3.11 cannaradar_cli.py status --json
-python3.11 cannaradar_cli.py export --json --kind all
+python3.11 provider_intel_cli.py init --json
+python3.11 provider_intel_cli.py doctor --json
+python3.11 provider_intel_cli.py sync --json --max 50 --limit 100
+python3.11 provider_intel_cli.py status --json
+python3.11 provider_intel_cli.py export --json --limit 100
 ```
 
-Resume after interruption:
+## Resume Workflow
 
 ```bash
-python3.11 cannaradar_cli.py status --json
-python3.11 cannaradar_cli.py sync --json --resume latest
+python3.11 provider_intel_cli.py status --json
+python3.11 provider_intel_cli.py sync --json --resume latest
 ```
 
-Agent diagnostics:
+## Diagnostics
 
 ```bash
-python3.11 cannaradar_cli.py search --json --preset failed-domains
-python3.11 cannaradar_cli.py search --json --preset blocked-domains
-python3.11 cannaradar_cli.py search --json --preset research-needed
-python3.11 cannaradar_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"
+python3.11 provider_intel_cli.py search --json --preset failed-domains
+python3.11 provider_intel_cli.py search --json --preset blocked-domains
+python3.11 provider_intel_cli.py search --json --preset outreach-ready
+python3.11 provider_intel_cli.py search --json --preset review-queue
+python3.11 provider_intel_cli.py search --json --preset contradictions
+python3.11 provider_intel_cli.py sql --json --query "SELECT seed_domain, last_status_code FROM seed_telemetry ORDER BY updated_at DESC LIMIT 20"
 ```
 
-Checkpoint state is written to `data/state/agent_runs/` by default, or to `--checkpoint-dir` when specified.
+## Expected Outputs
 
-## Run modes
-
-### Full run (recommended)
-
-```bash
-./run_v4.sh
-```
-
-What it performs:
-
-- lock acquisition
-- optional canonical ingest if `CANNARADAR_RUN_CANONICAL_INGEST=1`
-- crawl discovery/fetch/parse/enrich/score/export
-- changelog diff generation
-- run manifest write
-- segment guardrail check
-
-### Canonical batch run
-
-```bash
-python3.11 cannaradar_cli.py sync --json --seeds seeds.csv
-python3.11 cannaradar_cli.py status --json
-python3.11 cannaradar_cli.py export --json --kind all
-```
-
-### Stage and legacy compatibility runs
-
-```bash
-python3.11 cannaradar_cli.py crawl:run --seeds seeds.csv
-python3.11 cannaradar_cli.py enrich:run --since "2026-02-17T00:00:00"
-python3.11 cannaradar_cli.py score:run
-python3.11 cannaradar_cli.py export:outreach --tier A --limit 200
-python3.11 cannaradar_cli.py export:research --limit 200
-python3.11 cannaradar_cli.py quality:report
-```
-
-### Maintenance runs
-
-```bash
-PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py
-python3.11 jobs/export_changes.py --run-id "$(date +%Y%m%d-%H%M%S)"
-python3.11 jobs/log_outreach_event.py --website curaleaf.com --channel email --outcome replied --notes "Left voicemail"
-```
-
-### Seed hygiene cleanup
-
-Run before crawl runs when `seeds.csv` has drift/duplicates:
-
-```bash
-python3.11 tools/seed_hygiene.py
-```
-
-Outputs:
-
-- `out/seeds_clean.csv` (rows with missing website removed, website/domain normalized, deduped by normalized website)
-- `out/seed_hygiene_report.json` (counts and paths)
-
-### Discovery ranking signals
-
-Run after seed hygiene (or directly against `seeds.csv`) to produce a ranked discovery input using simple metadata signals:
-
-```bash
-python3.11 tools/discovery_rank_signals.py
-```
-
-Behavior:
-
-- Reads `out/seeds_clean.csv` when present, otherwise `seeds.csv`.
-- Scores each row using `has_state`, `has_market`, `known_mso_name_match`, and `website_quality` (HTTPS + non-placeholder domain).
-
-Outputs:
-
-- `out/discovery_ranked.csv` (input rows + `rank_score` + `rank_reasons`, sorted by `rank_score` descending)
-- `out/discovery_rank_report.json` (score distribution and summary stats)
-
-## Expected file outputs
-
-- `out/outreach_ready_<YYYYMMDD-HHMMSS>.csv`
-- `out/outreach_dispensary_100.csv`
-- `out/lead_intelligence/lead_intelligence_index.csv`
-- `out/lead_intelligence/lead_intelligence_table.md`
-- `out/lead_intelligence/lead_intelligence_manifest.json`
-- `out/lead_intelligence/leads/<lead-id>-<company>/report.md`
-- `out/lead_intelligence/leads/<lead-id>-<company>/agent_research_prompt.md`
-- `out/excluded_non_dispensary.csv`
-- `out/merge_suggestions_<YYYYMMDD-HHMMSS>.csv`
-- `out/research_queue.csv`
-- `out/agent_research_queue.csv`
-- `out/v4_quality_report.txt`
-- `out/quality_report.json`
-- `out/changes_<YYYYMMDD-HHMMSS>.csv`
-- `out/changes_<YYYYMMDD-HHMMSS>.txt`
+- `out/provider_intel/provider_records_<run_id>.csv`
+- `out/provider_intel/provider_records_<run_id>.json`
+- `out/provider_intel/sales_report_<run_id>.csv`
+- `out/provider_intel/review_queue_<run_id>.csv`
+- `out/provider_intel/profiles/`
+- `out/provider_intel/evidence/`
+- `out/provider_intel/outreach/`
 - `data/state/last_run_manifest.json`
-- `data/state/last_change_metrics.json`
+- `data/state/agent_runs/run_<id>.json`
+- `data/state/agent_runs/control_<id>.json`
 
-## Pre-flight checks
+## Pre-Run Checks
 
-- Run `python3.11 cannaradar_cli.py doctor --json` and confirm `ok: true` before long crawl runs.
-- Ensure seed file exists and has `name,website,state,market` header.
-- Verify `CANNARADAR_DENYLIST` does not include required domains.
-- Confirm robots access by checking fetch logs for blocked URLs.
-- Confirm `fetch_policies.json` contains exact normalized domains only for any browser-only overrides.
-- On macOS, leave `CANNARADAR_CRAWLEE_BROWSER_ISOLATION=subprocess` unless you are debugging the inline browser path.
+- `doctor --json` returns `ok: true`
+- seed pack exists and is readable
+- prescriber rules exist and are readable
+- output and state directories are writable
+- browser dependencies are installed for JS-heavy sources
 
-## Post-run checks
+## Post-Run Checks
 
-- Confirm `out/outreach_dispensary_100.csv` exists and has header `segment`.
-- Confirm all rows in this file are `segment == dispensary`.
-- Confirm `out/research_queue.csv` is not empty when discovery footprint is expected.
-- Confirm `out/agent_research_queue.csv` is generated when scored leads exist.
-- Confirm `out/v4_quality_report.txt` and `out/quality_report.json` are generated.
-- Confirm manifest and metrics files exist and include run identifiers.
+- approved exports exist when confidence/evidence thresholds are met
+- sales report exists when at least one approved record is outreach-ready
+- review queue exists when records are uncertain or missing clinician/license proof
+- checkpoint summary matches crawl/extract/resolve totals
+- blocked domains and contradiction counts are visible in `status`
 
-## Schema checks and rollout safety
+## Recovery
 
-`jobs/ingest_sources.py` enforces:
-
-- correct DB user version (`user_version`)
-- exact required tables and columns
-- required index set
-- `schema_migrations` metadata check for current version
-- checksum match for migration integrity
-
-If bootstrap fails:
-
-1. Stop all scheduled runs.
-2. Backup current DB:
-   `cp data/cannaradar_v1.db data/cannaradar_v1.db.<timestamp>.bak`
-3. Restore previous known-good DB.
-4. Re-run `PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py`.
-5. Re-run the target pipeline command.
-
-## Recovery playbook
-
-### Interrupted agent run
-
-- Inspect the latest checkpoint with `python3.11 cannaradar_cli.py status --json`.
-- Resume with `python3.11 cannaradar_cli.py sync --json --resume latest`.
-- If a checkpoint is corrupt or stale, point to a different directory with `--checkpoint-dir` and re-run `init` + `doctor`.
-
-### No crawl output
-
-- Re-run with smaller max page settings.
-- Check seed URLs are live and not denied.
-- Confirm DNS/SSL/network availability.
-
-### Segment purity alert
-
-- Inspect segment rule inputs in `pipeline/stages/export.py`.
-- Verify extraction is correctly mapping `website` and `canonical_name`.
-- Re-run `python3.11 cannaradar_cli.py export:outreach --tier A --limit 200` after fixes.
-
-### Empty score output
-
-- Ensure crawl generated successful results (`status_code == 200`) and evidence rows exist.
-- Confirm `lead_scores` rows are being written during `score:run`.
-
-### Merge-suggestion noise spike
-
-- Inspect `out/merge_suggestions_<timestamp>.csv`.
-- Spot-check `reason`, `canonical_location_pk`, and `candidate_location_pk`.
-- Tighten normalization inputs before rerunning.
-
-## AI agent / automation checklist
-
-For deterministic changes:
-
-- touch one stage at a time
-- keep behavior scoped to that stage
-- update relevant tests under `tests/`
-- record rationale in commit message
-- mention rollback steps in runbook if behavior changes externally visible
-
-## Exit code reference
-
-- `0`: success
-- `2`: usage error
-- `10`: config error
-- `11`: auth error
-- `12`: network error
-- `13`: data validation error
-- `14`: storage error
-- `15`: resume state error
-- `16`: runtime error
-- `17`: command failed
-
-Schema and command-contract details live in `docs/AGENT_OPS_PLAYBOOK.md` and `docs/schemas/cli/v1/`.
-
-## Acceptance check (manual)
-
-- Dispensary export is populated.
-- Segment guardrail is passing.
-- Diff artifacts are generated with normalized keys.
-- Quality report includes non-empty freshness buckets and menu provider list.
-- Latest manifest references executed seed and config paths.
-
-## Discovery troubleshooting quick-loop (high signal)
-
-Use this loop when discovery quality drops (irrelevant results, duplicates, weak fit).
-
-1) Capture baseline before changes
-
-```bash
-python3.11 cannaradar_cli.py quality:report
-ls -1t out/research_queue.csv out/outreach_dispensary_100.csv out/quality_report.json 2>/dev/null
-```
-
-2) Validate discovery seed quality
-
-```bash
-head -n 20 discoveries.csv
-python3.11 - <<'PY'
-import csv
-from collections import Counter
-rows=list(csv.DictReader(open('discoveries.csv', newline='', encoding='utf-8')))
-print('rows',len(rows))
-print('missing_website',sum(1 for r in rows if not (r.get('website') or '').strip()))
-print('duplicate_websites',len(rows)-len({(r.get('website') or '').strip().lower() for r in rows if (r.get('website') or '').strip()}))
-print('states_top5',Counter((r.get('state') or '').strip() for r in rows).most_common(5))
-PY
-```
-
-3) Run constrained discovery test
-
-```bash
-CANNARADAR_MAX_SEEDS=50 ./run_v4.sh
-```
-
-4) Check for noisy outputs
-
-```bash
-python3.11 - <<'PY'
-import csv
-from collections import Counter
-rows=list(csv.DictReader(open('out/research_queue.csv', newline='', encoding='utf-8')))
-print('research_rows',len(rows))
-print('top_domains',Counter((r.get('website') or '').split('/')[0] for r in rows).most_common(10))
-PY
-```
-
-5) If noise is high, tighten inputs (in order)
-
-- Remove weak/empty seeds from `discoveries.csv`.
-- Add known low-signal domains to `CANNARADAR_DENYLIST`.
-- Reduce discovery breadth with `CANNARADAR_MAX_SEEDS` for validation runs.
-- Re-run and compare `out/quality_report.json` before/after.
-
-6) Rollback if quality regresses
-
-```bash
-cp data/cannaradar_v1.db data/cannaradar_v1.db.rollback.$(date +%Y%m%d-%H%M%S)
-# restore previous known-good backup if needed
-```
-
-Success criteria for discovery fix runs:
-
-- Fewer irrelevant entries in `out/research_queue.csv`
-- Stable/clean dispensary list in `out/outreach_dispensary_100.csv`
-- No spike in merge noise (`out/merge_suggestions_<timestamp>.csv`)
+- Resume interrupted runs with `--resume latest`
+- Use `control` commands to quarantine or stop noisy domains instead of restarting
+- Re-run `init` if schema checksum or migration metadata drifts
+- Prefer bounded reruns against a reduced seed subset when validating extraction changes

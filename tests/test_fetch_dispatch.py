@@ -271,7 +271,7 @@ def test_seed_crawl_state_filters_assets_and_honors_manual_controls() -> None:
     con = _connect()
     metrics = Metrics("fetch-controls")
     logger = build_logger("fetch-controls", "fetch")
-    cfg = load_crawl_config("/tmp/cannaradar-fetch-controls-does-not-exist.json")
+    cfg = load_crawl_config("/tmp/provider-intel-fetch-controls-does-not-exist.json")
     seed = DiscoverySeed(name="Green Leaf", website="https://greenleaf.com", state="CA", market="CA")
     recorder = SeedRunRecorder(
         con=con,
@@ -321,7 +321,7 @@ def test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns() -> None:
     con = _connect()
     metrics = Metrics("fetch-healing")
     logger = build_logger("fetch-healing", "fetch")
-    cfg = load_crawl_config("/tmp/cannaradar-fetch-healing-does-not-exist.json")
+    cfg = load_crawl_config("/tmp/provider-intel-fetch-healing-does-not-exist.json")
     seed = DiscoverySeed(name="Healing Seed", website="https://healing.example", state="CA", market="CA")
     recorder = SeedRunRecorder(
         con=con,
@@ -378,7 +378,7 @@ def test_run_fetch_contains_browser_driver_failure_to_one_seed() -> None:
         con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         metrics = Metrics("fetch-runtime-failure")
         logger = build_logger("fetch-runtime-failure", "fetch")
-        cfg = load_crawl_config("/tmp/cannaradar-fetch-runtime-failure.json")
+        cfg = load_crawl_config("/tmp/provider-intel-fetch-runtime-failure.json")
         cfg.crawlee_browser_isolation = "subprocess"
         seeds = [
             DiscoverySeed(name="Crash Seed", website="https://fail.example", state="CA", market="CA"),

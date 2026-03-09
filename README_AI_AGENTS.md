@@ -1,77 +1,30 @@
-# AI Agent Reference: CannaRadar v1.5
+# AI Agent Reference: Provider Intelligence
 
-Use this document when proposing code changes or operating live runs.
+The active runtime in this repository is the provider-intelligence engine.
 
-## Primary Contract
+## Canonical Commands
 
-The canonical agent surface is the CLI plus run-state files:
+- `provider_intel_cli.py init`
+- `provider_intel_cli.py doctor`
+- `provider_intel_cli.py sync`
+- `provider_intel_cli.py tail`
+- `provider_intel_cli.py status`
+- `provider_intel_cli.py search`
+- `provider_intel_cli.py sql`
+- `provider_intel_cli.py export`
+- `provider_intel_cli.py control`
 
-- `cannaradar_cli.py init`
-- `cannaradar_cli.py doctor`
-- `cannaradar_cli.py sync`
-- `cannaradar_cli.py tail`
-- `cannaradar_cli.py status`
-- `cannaradar_cli.py search`
-- `cannaradar_cli.py sql`
-- `cannaradar_cli.py export`
-- `cannaradar_cli.py control`
+## Read First
 
-Prefer `--json` for agent workflows.
+1. `/Users/horcrux/Development/CannaRadar/README.md`
+2. `/Users/horcrux/Development/CannaRadar/docs/AGENT_OPS_PLAYBOOK.md`
+3. `/Users/horcrux/Development/CannaRadar/docs/RUNBOOK_V1.md`
+4. `/Users/horcrux/Development/CannaRadar/SKILL.md`
 
-Read these first:
+## Operating Notes
 
-- `/Users/horcrux/Development/CannaRadar/docs/AGENT_OPS_PLAYBOOK.md`
-- `/Users/horcrux/Development/CannaRadar/docs/RUNBOOK_V1.md`
-- `/Users/horcrux/Development/CannaRadar/SKILL.md`
-
-## Focus Areas
-
-- CLI and checkpoint behavior: `cli/`, `pipeline/run_state.py`
-- Fetch/runtime behavior: `pipeline/fetch_backends/`, `pipeline/config.py`
-- Parse: `pipeline/stages/parse.py`
-- Resolve: `pipeline/stages/resolve.py`
-- Score: `pipeline/stages/score.py`
-- Export contracts: `pipeline/stages/export.py`, `jobs/export_changes.py`
-- Lead research/enhancement: `pipeline/stages/research.py`
-
-## Safe Edit Principles
-
-- One stage per patch when possible.
-- Keep SQL migrations additive when possible.
-- Preserve existing output column contracts unless a migration/version change is included.
-- Add tests for changed behavior in `tests/`.
-- Preserve `deleted_at=''` soft-delete semantics unless a schema-wide change is intentional.
-
-## Live-Run Operating Rules
-
-- Start uncertain environments with `init` and `doctor`.
-- Prefer bounded live runs before full inventory runs.
-- Use `status --json` and checkpoint files to diagnose progress instead of relying on terminal noise.
-- On macOS, prefer the default isolated browser worker (`crawleeBrowserIsolation=subprocess`) for unattended runs.
-- Use `out/agent_research_queue.csv` and `search --preset research-needed` to decide which leads still need agent follow-up.
-- Resume interrupted runs with `sync --resume latest` when the checkpoint is still valid.
-- Treat repeated asset/static/blog churn in fetch as URL-filter debt, not as proof the pipeline is healthy.
-- Treat malformed seed domains as seed-quality issues first.
-
-## Fetch Notes
-
-- Do not change robot or denylist behavior without documenting the operational/legal scope.
-- Keep per-domain delay, backoff, and cache semantics explicit.
-- Use `seed_telemetry` to reason about blocked, failed, and cooling-off domains.
-
-## Testing Expectations
-
-Baseline validation:
-
-- `PYTHONPATH=$PWD python3.11 tests/test_agent_cli.py`
-- `PYTHONPATH=$PWD python3.11 tests/test_run_state.py`
-- `PYTHONPATH=$PWD python3.11 tests/test_fetch_config.py`
-- `PYTHONPATH=$PWD python3.11 tests/test_fetch_dispatch.py`
-- `PYTHONPATH=$PWD python3.11 tests/test_parse_stage.py`
-- `PYTHONPATH=$PWD python3.11 tests/test_resolve_stage.py`
-
-When fetch/runtime behavior changes:
-
-- `CANNARADAR_RUN_FETCH_INTEGRATION=1 PYTHONPATH=$PWD python3.11 tests/test_fetch_integration.py`
-
-Run `./run_smoke_tests.sh` only when the workspace has the generated artifact set required by `tests/smoke_v1.py`.
+- The pipeline is checkpointed and resumable.
+- The canonical scope is New Jersey provider intelligence.
+- Critical fields must have source evidence before export.
+- Review queue routing is part of the expected output, not a failure mode.
+- Use bounded sync runs before broad crawl changes.

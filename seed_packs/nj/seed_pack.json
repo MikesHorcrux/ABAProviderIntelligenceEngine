@@ -47,19 +47,19 @@
       "priority": 114
     },
     {
-      "name": "Hackensack Meridian Autism Center",
-      "website": "https://www.hackensackmeridianhealth.org/en/services/childrens-health/autism-center",
+      "name": "RWJBarnabas Developmental Evaluations",
+      "website": "https://www.rwjbh.org/treatment-care/pediatrics/conditions-treatments/pediatric-autism/developmental-evaluations/",
       "state": "NJ",
-      "metro": "Newark",
+      "metro": "Edison-New Brunswick",
       "tier": "A",
       "source_type": "hospital_directory",
-      "browser_required": true,
+      "browser_required": false,
       "extraction_profile": "hospital",
       "priority": 110
     },
     {
-      "name": "Rutgers Center for Autism",
-      "website": "https://gsapp.rutgers.edu/centers-clinics/center-adult-autism-services",
+      "name": "Rutgers Center for Adult Autism Services",
+      "website": "https://gsapp.rutgers.edu/centers-clinics/rutgers-center-adult-autism-services-rcaas",
       "state": "NJ",
       "metro": "Newark",
       "tier": "B",

@@ -201,7 +201,7 @@ async def _run_browser_worker(state: BrowserWorkerState, initial_requests: list[
             "results": state.results,
         }
 
-    queue_name = _storage_name("cannaradar-browser-worker", f"{normalize_domain(state.seed.website)}-{os.getpid()}")
+    queue_name = _storage_name("provider-intel-browser-worker", f"{normalize_domain(state.seed.website)}-{os.getpid()}")
     request_queue = await RequestQueue.open(name=queue_name)
     crawler = PlaywrightCrawler(
         request_manager=request_queue,

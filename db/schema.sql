@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS providers (
   created_at TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_providers_npi ON providers(npi);
+DROP INDEX IF EXISTS uq_providers_npi;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_providers_npi ON providers(npi) WHERE npi <> '';
 CREATE INDEX IF NOT EXISTS idx_providers_name ON providers(provider_name);
 
 CREATE TABLE IF NOT EXISTS practices (
@@ -93,6 +94,9 @@ CREATE TABLE IF NOT EXISTS provider_practice_records (
   source_urls_json TEXT NOT NULL DEFAULT '[]',
   field_confidence_json TEXT NOT NULL DEFAULT '{}',
   record_confidence REAL NOT NULL DEFAULT 0.0,
+  outreach_fit_score REAL NOT NULL DEFAULT 0.0,
+  outreach_ready INTEGER NOT NULL DEFAULT 0,
+  outreach_reasons_json TEXT NOT NULL DEFAULT '[]',
   conflict_note TEXT NOT NULL DEFAULT '',
   review_status TEXT NOT NULL DEFAULT 'pending',
   export_status TEXT NOT NULL DEFAULT 'pending',
@@ -103,11 +107,14 @@ CREATE TABLE IF NOT EXISTS provider_practice_records (
   FOREIGN KEY (provider_id) REFERENCES providers(provider_id) ON DELETE CASCADE,
   FOREIGN KEY (practice_id) REFERENCES practices(practice_id) ON DELETE CASCADE,
   FOREIGN KEY (location_id) REFERENCES practice_locations(location_id) ON DELETE CASCADE,
-  CHECK (record_confidence >= 0 AND record_confidence <= 1)
+  CHECK (record_confidence >= 0 AND record_confidence <= 1),
+  CHECK (outreach_fit_score >= 0 AND outreach_fit_score <= 1),
+  CHECK (outreach_ready IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_provider_practice_records_provider ON provider_practice_records(provider_id);
 CREATE INDEX IF NOT EXISTS idx_provider_practice_records_practice ON provider_practice_records(practice_id);
 CREATE INDEX IF NOT EXISTS idx_provider_practice_records_review ON provider_practice_records(review_status, export_status);
+CREATE INDEX IF NOT EXISTS idx_provider_practice_records_outreach ON provider_practice_records(outreach_ready, outreach_fit_score);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_practice_identity
   ON provider_practice_records(provider_id, practice_id, location_id);
 
