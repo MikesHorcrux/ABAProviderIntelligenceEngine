@@ -9,8 +9,8 @@ from pipeline.utils import utcnow_iso
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RUN_STATE_DIR = ROOT / "data" / "state" / "agent_runs"
-STAGE_ORDER = ("discovery", "fetch", "enrich", "score", "research", "export")
-RUN_STATE_SCHEMA_VERSION = "run_state.v1"
+STAGE_ORDER = ("seed_ingest", "crawl", "extract", "resolve", "score", "qa", "export")
+RUN_STATE_SCHEMA_VERSION = "provider_intel.run_state.v1"
 
 
 def ensure_run_state_dir(base_dir: str | Path | None = None) -> Path:
@@ -31,6 +31,11 @@ def serialize_seed(seed: DiscoverySeed) -> dict[str, object]:
         "market": seed.market,
         "source": seed.source,
         "priority": seed.priority,
+        "tier": seed.tier,
+        "source_type": seed.source_type,
+        "browser_required": seed.browser_required,
+        "extraction_profile": seed.extraction_profile,
+        "metadata": dict(seed.metadata),
     }
 
 
@@ -42,6 +47,11 @@ def deserialize_seed(payload: dict[str, object]) -> DiscoverySeed:
         market=str(payload.get("market") or ""),
         source=str(payload.get("source") or "seed_file"),
         priority=int(payload.get("priority") or 0),
+        tier=str(payload.get("tier") or ""),
+        source_type=str(payload.get("source_type") or ""),
+        browser_required=bool(payload.get("browser_required") or False),
+        extraction_profile=str(payload.get("extraction_profile") or ""),
+        metadata=dict(payload.get("metadata") or {}),
     )
 
 

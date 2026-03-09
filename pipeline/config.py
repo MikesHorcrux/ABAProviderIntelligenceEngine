@@ -12,7 +12,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "crawler_config.j
 
 @dataclass
 class CrawlConfig:
-    user_agent: str = "LunaLeadCrawler/3.0 (+local; production-grade)"
+    user_agent: str = "ProviderIntelCrawler/1.0 (+local; evidence-first)"
     timeout_seconds: float = 8.0
     max_retries: int = 3
     retry_delay_seconds: float = 1.5
@@ -23,8 +23,8 @@ class CrawlConfig:
     respect_robots: bool = True
     allowed_schemes: list[str] = field(default_factory=lambda: ["http", "https"])
     denylist: list[str] = field(default_factory=list)
-    seed_file: str = "seeds.csv"
-    discovery_seed_file: str = "discoveries.csv"
+    seed_file: str = "seed_packs/nj/seed_pack.json"
+    discovery_seed_file: str = ""
     monitor_stale_days: int = 30
     monitor_max_pages_per_domain: int = 12
     monitor_max_total_pages: int = 24
@@ -48,38 +48,42 @@ class CrawlConfig:
     agent_research_paths: list[str] = field(
         default_factory=lambda: [
             "/about",
+            "/providers",
             "/team",
-            "/leadership",
-            "/our-team",
             "/staff",
+            "/diagnosis",
+            "/evaluations",
+            "/evaluation",
+            "/testing",
+            "/autism",
+            "/adhd",
+            "/intake",
+            "/referrals",
             "/contact",
-            "/menu",
             "/locations",
-            "/careers",
-            "/jobs",
-            "/brands",
-            "/vendors",
+            "/telehealth",
+            "/insurance",
         ]
     )
     retry_base_delay_seconds: float = 1.25
     retry_factor: float = 1.9
     per_domain_min_interval_seconds: float = 1.25
     extra_paths: list[str] = field(
-        default_factory=lambda: ["/about", "/team", "/contact", "/menu", "/locations"]
+        default_factory=lambda: ["/about", "/providers", "/team", "/diagnosis", "/evaluation", "/contact", "/locations", "/telehealth"]
     )
     role_keywords: list[str] = field(
         default_factory=lambda: [
-            "owner",
-            "co-founder",
-            "founder",
-            "general manager",
-            "gm",
-            "inventory manager",
-            "buyer",
-            "purchasing",
-            "operator",
-            "store manager",
-            "director of operations",
+            "psy.d",
+            "ph.d",
+            "psychologist",
+            "psychiatrist",
+            "developmental pediatrician",
+            "physician assistant",
+            "nurse practitioner",
+            "apn",
+            "np",
+            "md",
+            "do",
         ]
     )
     max_concurrency: int = 1

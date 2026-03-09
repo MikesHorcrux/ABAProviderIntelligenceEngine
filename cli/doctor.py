@@ -8,37 +8,29 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from cli.errors import ConfigError
+from jobs.ingest_sources import assert_schema_layout, assert_schema_migration, init_db
 from pipeline.config import DEFAULT_CONFIG_PATH, CrawlConfig, load_crawl_config
 from pipeline.db import connect_db
 from pipeline.run_state import ensure_run_state_dir
 
-from cli.errors import ConfigError
-
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT_DIR = ROOT / "out"
+OUT_DIR = ROOT / "out" / "provider_intel"
 STATE_DIR = ROOT / "data" / "state"
-DEFAULT_POLICY_NAME = "fetch_policies.json"
-MIN_FREE_BYTES = 256 * 1024 * 1024
+MIN_FREE_BYTES = 128 * 1024 * 1024
 
 
 def resolve_config_path(cli_value: str | None) -> Path:
     if cli_value:
         return Path(cli_value).expanduser().resolve()
-    env_value = os.environ.get("CANNARADAR_CRAWLER_CONFIG")
+    env_value = os.environ.get("PROVIDER_INTEL_CONFIG") or os.environ.get("CANNARADAR_CRAWLER_CONFIG")
     if env_value:
         return Path(env_value).expanduser().resolve()
     return DEFAULT_CONFIG_PATH.resolve()
 
 
-def check_item(
-    check_id: str,
-    status: str,
-    summary: str,
-    *,
-    details: dict[str, Any] | None = None,
-    remediation: str = "",
-) -> dict[str, Any]:
+def check_item(check_id: str, status: str, summary: str, *, details: dict[str, Any] | None = None, remediation: str = "") -> dict[str, Any]:
     return {
         "id": check_id,
         "status": status,
@@ -48,84 +40,56 @@ def check_item(
     }
 
 
-def run_doctor(
-    *,
-    db_path: str,
-    config_path: str | None,
-    run_state_dir: str | None,
-) -> dict[str, Any]:
+def run_doctor(*, db_path: str, config_path: str | None, run_state_dir: str | None) -> dict[str, Any]:
     resolved_config = resolve_config_path(config_path)
     checks: list[dict[str, Any]] = []
     cfg: CrawlConfig | None = None
 
-    python_ok = os.sys.version_info >= (3, 11)
     checks.append(
         check_item(
             "python_version",
-            "pass" if python_ok else "fail",
+            "pass" if os.sys.version_info >= (3, 11) else "fail",
             f"Python runtime is {os.sys.version.split()[0]}",
             details={"required": "3.11+"},
-            remediation="Use python3.11 for agent CLI and Crawlee runtime.",
+            remediation="Use python3.11 for the provider intelligence CLI.",
         )
     )
-
-    config_exists = resolved_config.exists()
     checks.append(
         check_item(
             "config_path",
-            "pass" if config_exists else "fail",
-            f"Config path {'exists' if config_exists else 'is missing'}: {resolved_config}",
-            remediation="Run `cannaradar_cli.py init` to create the default config, or pass `--config`.",
+            "pass" if resolved_config.exists() else "fail",
+            f"Config path {'exists' if resolved_config.exists() else 'is missing'}: {resolved_config}",
+            remediation="Run `provider_intel_cli.py init` or pass `--config`.",
         )
     )
 
     try:
         cfg = load_crawl_config(resolved_config)
-        checks.append(
-            check_item(
-                "config_load",
-                "pass",
-                "Crawler config loaded successfully",
-                details={"config_path": str(resolved_config)},
-            )
-        )
+        checks.append(check_item("config_load", "pass", "Crawler config loaded successfully", details={"config_path": str(resolved_config)}))
     except Exception as exc:
-        checks.append(
-            check_item(
-                "config_load",
-                "fail",
-                f"Failed to load crawler config: {exc}",
-                remediation="Validate crawler_config.json syntax and required numeric values.",
-            )
-        )
-        cfg = None
+        checks.append(check_item("config_load", "fail", f"Failed to load config: {exc}", remediation="Fix JSON syntax in crawler_config.json."))
 
-    seed_paths: list[str] = []
     if cfg is not None:
-        for candidate in [cfg.seed_file, cfg.discovery_seed_file]:
-            if not candidate:
-                continue
-            path = cfg.resolve_runtime_path(candidate)
-            seed_paths.append(str(path))
-        missing_seed_paths = [path for path in seed_paths if not Path(path).exists()]
+        seed_path = cfg.resolve_runtime_path(cfg.seed_file) if cfg.seed_file else None
+        if seed_path and not seed_path.exists():
+            repo_relative = (ROOT / cfg.seed_file).resolve()
+            if repo_relative.exists():
+                seed_path = repo_relative
         checks.append(
             check_item(
-                "seed_inputs",
-                "pass" if not missing_seed_paths else "warn",
-                "Seed inputs resolved",
-                details={"paths": seed_paths, "missing": missing_seed_paths},
-                remediation="Create or point `seedFile` / `discoverySeedFile` at real CSV inputs.",
+                "seed_pack",
+                "pass" if seed_path and seed_path.exists() and seed_path.suffix.lower() == ".json" else "fail",
+                f"Seed pack path: {seed_path}",
+                remediation="Create the New Jersey seed pack or point `seedFile` at a valid manifest.",
             )
         )
-
-        policy_path = cfg.resolved_crawlee_domain_policies_path()
-        policy_status = "pass" if policy_path.exists() else "fail"
+        rules_path = ROOT / "reference" / "prescriber_rules" / "nj.json"
         checks.append(
             check_item(
-                "fetch_policies",
-                policy_status,
-                f"Fetch policy file {'found' if policy_path.exists() else 'missing'}: {policy_path}",
-                remediation="Create fetch_policies.json or set `crawleeDomainPoliciesFile` to a valid path.",
+                "prescriber_rules",
+                "pass" if rules_path.exists() else "fail",
+                f"Prescriber rules path: {rules_path}",
+                remediation="Add `reference/prescriber_rules/nj.json` before pilot runs.",
             )
         )
 
@@ -142,113 +106,53 @@ def run_doctor(
             probe.unlink()
             checks.append(check_item(f"writable_{label}", "pass", f"Writable path ready: {path}"))
         except Exception as exc:
-            checks.append(
-                check_item(
-                    f"writable_{label}",
-                    "fail",
-                    f"Cannot write to {path}: {exc}",
-                    remediation="Fix directory permissions before running sync/export commands.",
-                )
-            )
+            checks.append(check_item(f"writable_{label}", "fail", f"Cannot write to {path}: {exc}", remediation="Fix permissions."))
 
     try:
         con = connect_db(Path(db_path).expanduser().resolve())
         con.close()
         checks.append(check_item("db_connectivity", "pass", f"SQLite DB is reachable: {db_path}"))
     except Exception as exc:
-        checks.append(
-            check_item(
-                "db_connectivity",
-                "fail",
-                f"Failed to open SQLite DB: {exc}",
-                remediation="Ensure the DB path is writable and not held by another process.",
-            )
-        )
+        checks.append(check_item("db_connectivity", "fail", f"Failed to open SQLite DB: {exc}", remediation="Check the DB path and permissions."))
 
     try:
-        from jobs.ingest_sources import assert_schema_layout, assert_schema_migration
-
         con = sqlite3.connect(Path(db_path).expanduser().resolve())
         assert_schema_layout(con)
         assert_schema_migration(con)
         con.close()
         checks.append(check_item("db_schema", "pass", "Schema layout and migration metadata are healthy"))
     except Exception as exc:
-        checks.append(
-            check_item(
-                "db_schema",
-                "fail",
-                f"Schema validation failed: {exc}",
-                remediation="Run `cannaradar_cli.py init` or `PYTHONPATH=$PWD python3.11 jobs/ingest_sources.py`.",
-            )
-        )
+        checks.append(check_item("db_schema", "fail", f"Schema validation failed: {exc}", remediation="Run `provider_intel_cli.py init`."))
 
-    crawlee_ready = importlib.util.find_spec("crawlee") is not None
     checks.append(
         check_item(
             "crawlee_import",
-            "pass" if crawlee_ready else "fail",
+            "pass" if importlib.util.find_spec("crawlee") is not None else "fail",
             "Crawlee import check",
-            details={"available": crawlee_ready},
-            remediation="Install runtime dependencies with `pip install -r requirements.txt`.",
+            remediation="Install dependencies with `pip install -r requirements.txt`.",
         )
     )
-
-    playwright_ready = False
-    playwright_details: dict[str, Any] = {}
-    try:
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as pw:
-            browser_type = getattr(pw, "chromium")
-            executable = Path(browser_type.executable_path)
-            playwright_ready = executable.exists()
-            playwright_details = {
-                "browser": "chromium",
-                "executable": str(executable),
-            }
-    except Exception as exc:
-        playwright_details = {"error": str(exc)}
     checks.append(
         check_item(
-            "playwright_browser",
-            "pass" if playwright_ready else "warn",
-            "Playwright browser runtime check",
-            details=playwright_details,
-            remediation="Run `playwright install chromium` before browser-escalated crawls.",
-        )
-    )
-
-    token_envs = [name for name in ("OPENAI_API_KEY", "CANNARADAR_API_TOKEN") if os.environ.get(name)]
-    checks.append(
-        check_item(
-            "env_tokens",
-            "skip",
-            "No required external auth tokens are needed for the local crawler pipeline",
-            details={"present": token_envs, "required": []},
+            "playwright_import",
+            "pass" if importlib.util.find_spec("playwright") is not None else "warn",
+            "Playwright import check",
+            remediation="Install Playwright for browser-heavy directories and richer PDFs.",
         )
     )
 
     try:
         usage = shutil.disk_usage(ROOT)
-        disk_status = "pass" if usage.free >= MIN_FREE_BYTES else "warn"
         checks.append(
             check_item(
                 "disk_space",
-                disk_status,
+                "pass" if usage.free >= MIN_FREE_BYTES else "warn",
                 "Disk space check",
                 details={"free_bytes": usage.free, "threshold_bytes": MIN_FREE_BYTES},
-                remediation="Free disk space before long crawl runs if available space is low.",
             )
         )
     except Exception as exc:
-        checks.append(
-            check_item(
-                "disk_space",
-                "warn",
-                f"Could not determine disk space: {exc}",
-            )
-        )
+        checks.append(check_item("disk_space", "warn", f"Could not determine disk space: {exc}"))
 
     failed = [item for item in checks if item["status"] == "fail"]
     warned = [item for item in checks if item["status"] == "warn"]
@@ -281,30 +185,7 @@ def default_config_payload() -> dict[str, Any]:
         "denylist": cfg.denylist,
         "seedFile": cfg.seed_file,
         "discoverySeedFile": cfg.discovery_seed_file,
-        "monitorStaleDays": cfg.monitor_stale_days,
-        "monitorMaxPagesPerDomain": cfg.monitor_max_pages_per_domain,
-        "monitorMaxTotalPages": cfg.monitor_max_total_pages,
-        "monitorMaxDepth": cfg.monitor_max_depth,
-        "growthMaxPagesPerDomain": cfg.growth_max_pages_per_domain,
-        "growthMaxTotalPages": cfg.growth_max_total_pages,
-        "growthMaxDepth": cfg.growth_max_depth,
-        "weeklyNewLeadTarget": cfg.weekly_new_lead_target,
-        "growthWindowDays": cfg.growth_window_days,
-        "enforceGrowthGovernor": cfg.enforce_growth_governor,
-        "seedFailureStreakLimit": cfg.seed_failure_streak_limit,
-        "seedBackoffHours": cfg.seed_backoff_hours,
         "cacheTtlHours": cfg.cache_ttl_hours,
-        "requireFetchSuccessGate": cfg.require_fetch_success_gate,
-        "requireNetNewGate": cfg.require_net_new_gate,
-        "failOnZeroNewLeads": cfg.fail_on_zero_new_leads,
-        "outputStaleHours": cfg.output_stale_hours,
-        "agentResearchEnabled": cfg.agent_research_enabled,
-        "agentResearchLimit": cfg.agent_research_limit,
-        "agentResearchMinScore": cfg.agent_research_min_score,
-        "agentResearchPaths": cfg.agent_research_paths,
-        "retryBaseDelaySeconds": cfg.retry_base_delay_seconds,
-        "retryFactor": cfg.retry_factor,
-        "perDomainMinIntervalSeconds": cfg.per_domain_min_interval_seconds,
         "extraPaths": cfg.extra_paths,
         "roleKeywords": cfg.role_keywords,
         "maxConcurrency": cfg.max_concurrency,
@@ -325,43 +206,37 @@ def default_config_payload() -> dict[str, Any]:
 
 def default_fetch_policies_payload() -> dict[str, Any]:
     return {
-        "default": {
-            "mode": "http_then_browser_on_block",
-            "browserOnBlock": True,
-        },
+        "default": {"mode": "http_then_browser_on_block", "browserOnBlock": True},
         "domains": {},
     }
 
 
-def run_init(
-    *,
-    db_path: str,
-    config_path: str | None,
-    run_state_dir: str | None,
-) -> dict[str, Any]:
+def _config_requires_provider_rewrite(path: Path) -> bool:
+    if not path.exists():
+        return True
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    seed_file = str(payload.get("seedFile") or "").strip()
+    return not seed_file.endswith("seed_pack.json")
+
+
+def run_init(*, db_path: str, config_path: str | None, run_state_dir: str | None) -> dict[str, Any]:
     resolved_config = resolve_config_path(config_path)
     resolved_db = Path(db_path).expanduser().resolve()
-
     resolved_db.parent.mkdir(parents=True, exist_ok=True)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     ensure_run_state_dir(run_state_dir)
 
-    if not resolved_config.exists():
+    if _config_requires_provider_rewrite(resolved_config):
         resolved_config.write_text(json.dumps(default_config_payload(), indent=2), encoding="utf-8")
     cfg = load_crawl_config(resolved_config)
     resolved_policy = cfg.resolved_crawlee_domain_policies_path()
     if not resolved_policy.exists():
         resolved_policy.parent.mkdir(parents=True, exist_ok=True)
         resolved_policy.write_text(json.dumps(default_fetch_policies_payload(), indent=2), encoding="utf-8")
-
-    try:
-        from jobs.ingest_sources import init_db
-    except Exception as exc:
-        raise ConfigError(
-            f"Failed to import schema bootstrap helpers: {exc}",
-            details={"module": "jobs.ingest_sources"},
-        )
 
     con = sqlite3.connect(resolved_db)
     init_db(con)
@@ -376,7 +251,7 @@ def run_init(
         "run_state_dir": str(ensure_run_state_dir(run_state_dir)),
         "doctor": doctor,
         "next_steps": [
-            "cannaradar_cli.py doctor --json",
-            "cannaradar_cli.py sync --json",
+            "provider_intel_cli.py doctor --json",
+            "provider_intel_cli.py sync --json",
         ],
     }

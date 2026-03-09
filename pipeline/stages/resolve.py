@@ -1,297 +1,275 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from difflib import SequenceMatcher
-from typing import Iterable
-
+import json
 import sqlite3
+from dataclasses import dataclass
 
-from pipeline.utils import make_pk, normalize_domain, utcnow_iso
-from pipeline.stages.discovery import DiscoverySeed
-from pipeline.stages.parse import ParsedPage
-
-
-RESOLVE_DOMAIN_CONFIDENCE = 0.98
-RESOLVE_PHONE_CONFIDENCE = 0.95
-RESOLVE_NAME_MERGE_THRESHOLD = 0.92
-RESOLVE_NAME_SUGGEST_THRESHOLD = 0.80
+from pipeline.utils import make_pk, normalize_domain, normalize_text, utcnow_iso
 
 
 @dataclass(frozen=True)
-class ResolvedLocation:
-    company_pk: str
-    location_pk: str
-    domain: str
-    segment: str
-    merge_suggestions: int = 0
+class ResolveResult:
+    resolved_count: int
+    review_only_count: int
 
 
-def _match_similarity(a: str, b: str) -> float:
-    return SequenceMatcher(a=(a or "").lower(), b=(b or "").lower()).ratio()
+def _provider_lookup_by_npi(con: sqlite3.Connection, npi: str) -> str:
+    if not npi:
+        return ""
+    row = con.execute("SELECT provider_id FROM providers WHERE npi=? LIMIT 1", (npi,)).fetchone()
+    return str(row["provider_id"]) if row else ""
 
 
-def _match_by_domain(con: sqlite3.Connection, domain: str) -> tuple[str, str, float] | None:
+def _provider_lookup_by_domain_state(con: sqlite3.Connection, provider_name: str, practice_website: str, state: str) -> str:
+    if not provider_name or not practice_website or not state:
+        return ""
+    domain = normalize_domain(practice_website)
     row = con.execute(
         """
-        SELECT d.location_pk, l.org_pk
-        FROM domains d
-        INNER JOIN locations l ON l.location_pk = d.location_pk
-        WHERE d.domain = ?
+        SELECT pr.provider_id
+        FROM provider_practice_records pr
+        INNER JOIN practices p ON p.practice_id = pr.practice_id
+        WHERE lower(pr.provider_name_snapshot)=?
+          AND lower(pr.license_state)=?
+          AND lower(p.website) LIKE ?
         LIMIT 1
         """,
-        (domain,),
+        (provider_name.lower(), state.lower(), f"%{domain}%"),
     ).fetchone()
-    if not row:
-        return None
-    return row["org_pk"], row["location_pk"], RESOLVE_DOMAIN_CONFIDENCE
+    return str(row["provider_id"]) if row else ""
 
 
-def _match_by_phone(con: sqlite3.Connection, phone: str) -> tuple[str, str, float] | None:
-    if not phone:
-        return None
+def _provider_lookup_by_city_phone(con: sqlite3.Connection, provider_name: str, city: str, phone: str) -> str:
+    if not provider_name or not city or not phone:
+        return ""
     row = con.execute(
         """
-        SELECT l.location_pk, l.org_pk
-        FROM contact_points cp
-        INNER JOIN locations l ON l.location_pk = cp.location_pk
-        WHERE cp.type = 'phone' AND cp.value = ?
+        SELECT pr.provider_id
+        FROM provider_practice_records pr
+        INNER JOIN practice_locations pl ON pl.location_id = pr.location_id
+        WHERE lower(pr.provider_name_snapshot)=?
+          AND lower(pl.city)=?
+          AND pl.phone=?
         LIMIT 1
         """,
-        (phone,),
+        (provider_name.lower(), city.lower(), phone),
     ).fetchone()
-    if not row:
-        return None
-    return row["org_pk"], row["location_pk"], RESOLVE_PHONE_CONFIDENCE
+    return str(row["provider_id"]) if row else ""
 
 
-def _match_by_name_state(con: sqlite3.Connection, seed: DiscoverySeed) -> tuple[str, str, float] | None:
-    if not seed.name:
-        return None
+def resolve_extracted_records(con: sqlite3.Connection) -> ResolveResult:
+    now = utcnow_iso()
     rows = con.execute(
         """
-        SELECT location_pk, org_pk, canonical_name, state
-        FROM locations
-        WHERE lower(state) = ?
-        LIMIT 80
-        """,
-        (seed.state.lower(),),
+        SELECT *
+        FROM extracted_records
+        ORDER BY created_at ASC, extracted_id ASC
+        """
     ).fetchall()
-    best: tuple[str, str] | None = None
-    best_score = 0.0
+    resolved = 0
+    review_only = 0
+
     for row in rows:
-        score = _match_similarity(seed.name, row["canonical_name"])
-        if score > best_score:
-            best_score = score
-            best = row["org_pk"], row["location_pk"]
-    if not best or best_score < RESOLVE_NAME_SUGGEST_THRESHOLD:
-        return None
-    return best[0], best[1], best_score
+        evidence = json.loads(row["evidence_json"] or "[]")
+        if not row["provider_name"]:
+            if row["diagnoses_asd"] == "yes" or row["diagnoses_adhd"] == "yes":
+                con.execute(
+                    """
+                    INSERT OR REPLACE INTO review_queue
+                    (review_id, record_id, review_type, provider_name, practice_name, reason, source_url, evidence_quote, status, created_at)
+                    VALUES (?, '', 'missing_provider', '', ?, ?, ?, ?, 'pending', ?)
+                    """,
+                    (
+                        make_pk("rev", [row["practice_name"], row["source_url"], "missing_provider"]),
+                        row["practice_name"],
+                        "Practice offers evaluations but no named clinician was verified.",
+                        row["source_url"],
+                        (evidence[0]["quote"] if evidence else ""),
+                        now,
+                    ),
+                )
+                review_only += 1
+            continue
 
+        provider_id = (
+            _provider_lookup_by_npi(con, row["npi"])
+            or _provider_lookup_by_domain_state(con, row["provider_name"], row["source_url"], row["state"])
+            or _provider_lookup_by_city_phone(con, row["provider_name"], row["city"], row["phone"])
+            or make_pk("prov", [row["provider_name"], row["credentials"], row["state"], row["npi"] or row["source_url"]])
+        )
+        practice_id = make_pk("prac", [row["practice_name"], normalize_domain(row["source_url"]) or row["source_url"]])
+        location_id = make_pk("loc", [practice_id, row["city"], row["state"], row["phone"] or normalize_domain(row["source_url"])])
+        record_id = make_pk("rec", [provider_id, practice_id, location_id, row["state"]])
 
-def _upsert_domain(con: sqlite3.Connection, location_pk: str, domain: str, source_url: str, now: str) -> None:
-    if not domain:
-        return
-    domain_pk = make_pk("dom", [location_pk, domain])
-    con.execute(
-        """
-        INSERT OR REPLACE INTO domains
-        (domain_pk, location_pk, domain, is_primary, confidence, source_url, last_seen_at, created_at, updated_at, deleted_at)
-        VALUES (?,?,?,?,?,?,?,?,?,'')
-        """,
-        (domain_pk, location_pk, domain, 1, 0.82, source_url, now, now, now),
-    )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO providers
+            (provider_id, provider_name, credentials, npi, primary_license_state, primary_license_type, created_at, updated_at)
+            VALUES (
+              ?,
+              COALESCE(NULLIF((SELECT provider_name FROM providers WHERE provider_id=?), ''), ?),
+              ?,
+              ?,
+              ?,
+              ?,
+              COALESCE((SELECT created_at FROM providers WHERE provider_id=?), ?),
+              ?
+            )
+            """,
+            (
+                provider_id,
+                provider_id,
+                row["provider_name"],
+                row["credentials"],
+                row["npi"],
+                row["license_state"],
+                row["license_type"],
+                provider_id,
+                now,
+                now,
+            ),
+        )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO practices
+            (practice_id, practice_name, website, intake_url, phone, fax, created_at, updated_at)
+            VALUES (
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              COALESCE((SELECT created_at FROM practices WHERE practice_id=?), ?),
+              ?
+            )
+            """,
+            (
+                practice_id,
+                row["practice_name"],
+                row["source_url"],
+                row["intake_url"],
+                row["phone"],
+                row["fax"],
+                practice_id,
+                now,
+                now,
+            ),
+        )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO practice_locations
+            (location_id, practice_id, address_1, city, state, zip, metro, phone, telehealth, created_at, updated_at)
+            VALUES (
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              COALESCE((SELECT created_at FROM practice_locations WHERE location_id=?), ?),
+              ?
+            )
+            """,
+            (
+                location_id,
+                practice_id,
+                row["address_1"],
+                row["city"],
+                row["state"],
+                row["zip"],
+                row["metro"],
+                row["phone"],
+                row["telehealth"],
+                location_id,
+                now,
+                now,
+            ),
+        )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO licenses
+            (license_id, provider_id, license_state, license_type, license_number, license_status, source_url, retrieved_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM licenses WHERE license_id=?), ?), ?)
+            """,
+            (
+                make_pk("lic", [provider_id, row["license_state"], row["license_type"], row["npi"] or row["provider_name"]]),
+                provider_id,
+                row["license_state"],
+                row["license_type"],
+                row["npi"],
+                row["license_status"],
+                row["source_url"],
+                now,
+                make_pk("lic", [provider_id, row["license_state"], row["license_type"], row["npi"] or row["provider_name"]]),
+                now,
+                now,
+            ),
+        )
+        con.execute(
+            """
+            INSERT OR REPLACE INTO provider_practice_records
+            (record_id, provider_id, practice_id, location_id, provider_name_snapshot, practice_name_snapshot, npi,
+             license_state, license_type, license_status, diagnoses_asd, diagnoses_adhd, prescriptive_authority,
+             prescriptive_basis, age_groups_json, telehealth, insurance_notes, waitlist_notes, referral_requirements,
+             source_urls_json, field_confidence_json, record_confidence, conflict_note, review_status, export_status,
+             blocked_reason, last_verified_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown', '', ?, ?, ?, ?, ?, ?, '{}', 0.0, '', 'pending', 'pending', '', ?, COALESCE((SELECT created_at FROM provider_practice_records WHERE record_id=?), ?), ?)
+            """,
+            (
+                record_id,
+                provider_id,
+                practice_id,
+                location_id,
+                row["provider_name"],
+                row["practice_name"],
+                row["npi"],
+                row["license_state"],
+                row["license_type"],
+                row["license_status"],
+                row["diagnoses_asd"],
+                row["diagnoses_adhd"],
+                row["age_groups_json"],
+                row["telehealth"],
+                row["insurance_notes"],
+                row["waitlist_notes"],
+                row["referral_requirements"],
+                json.dumps([row["source_url"]]),
+                now,
+                record_id,
+                now,
+                now,
+            ),
+        )
 
-
-def _safe_location_state(existing: str | None, incoming: str | None, match_confidence: float) -> str:
-    current = (existing or "").strip()
-    incoming = (incoming or "").strip()
-    if not current:
-        return incoming
-    if incoming and current.lower() == incoming.lower():
-        return incoming
-    if match_confidence >= 0.99:
-        return incoming
-    return current
-
-
-def _write_merge_suggestion(
-    con: sqlite3.Connection,
-    canonical_location_pk: str,
-    candidate_location_pk: str,
-    reason: str,
-    confidence: float = 0.74,
-) -> bool:
-    suggestion_pk = make_pk("mrg", [canonical_location_pk, candidate_location_pk, reason])
-    now = utcnow_iso()
-    con.execute(
-        """
-        INSERT OR REPLACE INTO entity_resolutions
-        (resolution_pk, canonical_location_pk, candidate_location_pk, resolution_status, reason, confidence, created_at, updated_at, deleted_at)
-        VALUES (?,?,?,?,?,?,?,?,'')
-        """,
-        (suggestion_pk, canonical_location_pk, candidate_location_pk, "suggest_merge", reason, confidence, now, now),
-    )
-    return True
-
-
-def resolve_and_upsert_locations(
-    con: sqlite3.Connection,
-    seed: DiscoverySeed,
-    parsed_pages: Iterable[ParsedPage],
-) -> ResolvedLocation:
-    now = utcnow_iso()
-    domain = normalize_domain(seed.website)
-
-    name_state_review: tuple[str, str, float] | None = None
-    matched: tuple[str, str, float] | None = None
-
-    if domain:
-        matched = _match_by_domain(con, domain)
-
-    if not matched:
-        phones = [signal.value for page in parsed_pages for signal in page.phones if signal.value]
-        for value in phones:
-            matched = _match_by_phone(con, value)
-            if matched:
-                break
-
-    if not matched:
-        candidate = _match_by_name_state(con, seed)
-        if candidate:
-            candidate_org_pk, candidate_location_pk, candidate_conf = candidate
-            if candidate_conf >= RESOLVE_NAME_MERGE_THRESHOLD:
-                matched = candidate
-            else:
-                name_state_review = candidate
-
-    if matched:
-        org_pk, location_pk, match_confidence = matched
-        existing = con.execute(
-            "SELECT canonical_name, state, website_domain FROM locations WHERE location_pk = ?",
-            (location_pk,),
-        ).fetchone()
-        if existing is None:
-            matched = None
-        else:
-            location_state = _safe_location_state(existing["state"], seed.state, match_confidence)
-            canonical_name = existing["canonical_name"]
-            if not canonical_name and seed.name:
-                canonical_name = seed.name
+        for item in evidence:
+            field_name = normalize_text(item.get("field") or "")
+            value = normalize_text(item.get("value") or "")
+            if not field_name:
+                continue
             con.execute(
                 """
-                UPDATE locations
-                SET canonical_name = COALESCE(NULLIF(?, ''), canonical_name),
-                    website_domain = COALESCE(NULLIF(?, ''), website_domain),
-                    state = COALESCE(NULLIF(?, ''), state),
-                    last_seen_at = ?,
-                    last_crawled_at = ?,
-                    updated_at = ?
-                WHERE location_pk = ?
+                INSERT OR REPLACE INTO field_evidence
+                (evidence_id, record_id, field_name, field_value, quote, source_url, source_document_id, source_tier, captured_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    canonical_name,
-                    domain,
-                    location_state,
+                    make_pk("evi", [record_id, field_name, value, item.get("source_url") or row["source_url"]]),
+                    record_id,
+                    field_name,
+                    value,
+                    str(item.get("quote") or ""),
+                    str(item.get("source_url") or row["source_url"]),
+                    row["source_document_id"],
+                    row["source_tier"],
                     now,
-                    now,
-                    now,
-                    location_pk,
                 ),
             )
 
-            if domain:
-                duplicate = con.execute(
-                    """
-                    SELECT location_pk FROM domains
-                    WHERE domain = ? AND location_pk <> ?
-                    LIMIT 1
-                    """,
-                    (domain, location_pk),
-                ).fetchone()
-                if duplicate:
-                    _write_merge_suggestion(
-                        con,
-                        location_pk,
-                        duplicate["location_pk"],
-                        "domain_collision",
-                        0.94,
-                    )
-                    merge_count = 1
-                else:
-                    merge_count = 0
-            else:
-                merge_count = 0
+        resolved += 1
 
-            _upsert_domain(con, location_pk, domain, seed.website, now)
-            return ResolvedLocation(
-                company_pk=org_pk,
-                location_pk=location_pk,
-                domain=domain,
-                segment="unknown",
-                merge_suggestions=merge_count,
-            )
-
-    org_pk = make_pk("org", [seed.name, seed.state, domain])
-    con.execute(
-        """
-        INSERT OR REPLACE INTO organizations
-        (org_pk, legal_name, dba_name, state, created_at, updated_at, last_seen_at, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, '')
-        """,
-        (
-            org_pk,
-            seed.name or "Unknown",
-            seed.name or "Unknown",
-            seed.state,
-            now,
-            now,
-            now,
-        ),
-    )
-    company_pk = make_pk("co", [org_pk, seed.state, domain or "unknown"])
-    con.execute(
-        """
-        INSERT OR REPLACE INTO companies
-        (company_pk, organization_pk, legal_name, dba_name, state, created_at, updated_at, last_seen_at, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')
-        """,
-        (company_pk, org_pk, seed.name or "Unknown", seed.name or "Unknown", seed.state, now, now, now),
-    )
-    location_pk = make_pk("loc", [seed.name, domain, seed.state])
-    con.execute(
-        """
-        INSERT OR REPLACE INTO locations
-        (location_pk, org_pk, canonical_name, address_1, city, state, zip, website_domain, phone, fit_score, last_crawled_at, created_at, updated_at, last_seen_at, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, '')
-        """,
-        (
-            location_pk,
-            org_pk,
-            seed.name or "Unknown",
-            "",
-            "",
-            seed.state,
-            "",
-            domain,
-            "",
-            0,
-            now,
-            now,
-            now,
-        ),
-    )
-    _upsert_domain(con, location_pk, domain, seed.website, now)
-
-    merge_count = 0
-    if name_state_review:
-        _, review_location_pk, review_conf = name_state_review
-        _write_merge_suggestion(
-            con,
-            location_pk,
-            review_location_pk,
-            f"low_confidence_name_state_match:{round(review_conf, 2)}",
-            max(0.6, review_conf),
-        )
-        merge_count = 1
-
-    return ResolvedLocation(company_pk=company_pk, location_pk=location_pk, domain=domain, segment="unknown", merge_suggestions=merge_count)
+    con.commit()
+    return ResolveResult(resolved_count=resolved, review_only_count=review_only)

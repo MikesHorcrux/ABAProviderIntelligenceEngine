@@ -1,0 +1,16 @@
+{
+  "schema_version": "metro_lookup.v1",
+  "state": "NJ",
+  "metros": {
+    "newark": "Newark",
+    "jersey city": "Jersey City",
+    "paterson": "Paterson",
+    "edison": "Edison-New Brunswick",
+    "new brunswick": "Edison-New Brunswick",
+    "trenton": "Trenton-Princeton",
+    "princeton": "Trenton-Princeton",
+    "camden": "Cherry Hill-Camden",
+    "cherry hill": "Cherry Hill-Camden",
+    "atlantic city": "Atlantic City"
+  }
+}

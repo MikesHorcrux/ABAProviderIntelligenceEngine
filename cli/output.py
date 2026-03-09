@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-CLI_SCHEMA_VERSION = "cli.v1"
+CLI_SCHEMA_VERSION = "provider_intel.cli.v1"
 
 
 def success_payload(command: str, *, data: dict[str, Any] | None = None, message: str = "") -> dict[str, Any]:

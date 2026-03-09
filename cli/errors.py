@@ -97,7 +97,7 @@ def classify_exception(exc: Exception) -> CliError:
 
 def exit_codes_payload() -> dict[str, object]:
     return {
-        "schema_version": "cli.v1",
+        "schema_version": "provider_intel.cli.v1",
         "exit_codes": {
             "0": "success",
             "2": "usage_error",

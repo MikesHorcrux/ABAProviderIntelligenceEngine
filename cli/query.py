@@ -13,125 +13,44 @@ from pipeline.run_state import latest_run_state, load_run_state
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "data" / "state" / "last_run_manifest.json"
 LOCK_PATH = ROOT / "data" / "state" / "run_v4.lock"
-OUT_DIR = ROOT / "out"
-EXTERNAL_RESEARCH_ALLOWED_STATUSES = {"pending", "in_progress", "completed", "failed"}
-
+OUT_DIR = ROOT / "out" / "provider_intel"
 READ_ONLY_PREFIXES = ("select", "with")
-FORBIDDEN_SQL_TERMS = (
-    "insert",
-    "update",
-    "delete",
-    "alter",
-    "drop",
-    "create",
-    "replace",
-    "attach",
-    "detach",
-    "pragma journal_mode",
-    "vacuum",
-    "reindex",
-)
+FORBIDDEN_SQL_TERMS = ("insert", "update", "delete", "alter", "drop", "create", "replace", "attach", "detach", "vacuum", "reindex")
 
 PRESET_QUERIES = {
     "failed-domains": """
-        SELECT seed_domain,
-               last_status_code,
-               last_run_status,
-               last_run_success_pages,
-               last_run_failure_pages,
-               last_run_completed_at
+        SELECT seed_domain, last_status_code, last_run_status, last_run_success_pages, last_run_failure_pages, last_run_completed_at
         FROM seed_telemetry
-        WHERE last_run_success_pages = 0
-           OR last_run_status <> 'completed'
+        WHERE last_run_success_pages = 0 OR last_run_status <> 'completed'
         ORDER BY last_run_completed_at DESC, seed_domain ASC
         LIMIT ?
     """,
     "blocked-domains": """
-        SELECT seed_domain,
-               last_status_code,
-               last_run_status,
-               last_run_success_pages,
-               last_run_failure_pages,
-               last_run_completed_at
+        SELECT seed_domain, last_status_code, last_run_status, last_run_completed_at
         FROM seed_telemetry
         WHERE last_status_code IN (401, 403, 429, 503)
         ORDER BY last_run_completed_at DESC, seed_domain ASC
         LIMIT ?
     """,
-    "stale-records": """
-        SELECT canonical_name AS company_name,
-               website_domain AS website,
-               state,
-               last_crawled_at,
-               updated_at
-        FROM locations
-        WHERE COALESCE(deleted_at, '') = ''
-          AND (
-            last_crawled_at IS NULL
-            OR last_crawled_at = ''
-            OR datetime(last_crawled_at) <= datetime('now', '-30 days')
-          )
-        ORDER BY COALESCE(last_crawled_at, '') ASC, updated_at DESC
+    "low-confidence-records": """
+        SELECT provider_name_snapshot AS provider_name, practice_name_snapshot AS practice_name, record_confidence, review_status, blocked_reason
+        FROM provider_practice_records
+        WHERE record_confidence < 0.60
+        ORDER BY record_confidence ASC, updated_at DESC
         LIMIT ?
     """,
-    "low-confidence-leads": """
-        SELECT l.canonical_name AS company_name,
-               l.website_domain AS website,
-               l.state,
-               COALESCE(ls.score_total, 0) AS score,
-               COALESCE(ls.tier, 'C') AS tier
-        FROM locations l
-        LEFT JOIN lead_scores ls ON ls.location_pk = l.location_pk
-        WHERE COALESCE(l.deleted_at, '') = ''
-          AND COALESCE(ls.score_total, 0) < 40
-        ORDER BY COALESCE(ls.score_total, 0) ASC, l.updated_at DESC
+    "review-queue": """
+        SELECT review_type, provider_name, practice_name, reason, source_url, status, created_at
+        FROM review_queue
+        ORDER BY created_at DESC
         LIMIT ?
     """,
-    "research-needed": """
-        SELECT l.canonical_name AS company_name,
-               l.website_domain AS website,
-               l.state,
-               COALESCE((
-                 SELECT ls.score_total
-                 FROM lead_scores ls
-                 WHERE ls.location_pk = l.location_pk
-                 ORDER BY ls.as_of DESC
-                 LIMIT 1
-               ), 0) AS score,
-               COALESCE((
-                 SELECT e.field_value
-                 FROM evidence e
-                 WHERE e.entity_type = 'location'
-                   AND e.entity_pk = l.location_pk
-                   AND e.field_name = 'agent_research_status'
-                   AND COALESCE(e.deleted_at, '') = ''
-                 ORDER BY e.captured_at DESC
-                 LIMIT 1
-               ), '') AS research_status,
-               COALESCE((
-                 SELECT e.field_value
-                 FROM evidence e
-                 WHERE e.entity_type = 'location'
-                   AND e.entity_pk = l.location_pk
-                   AND e.field_name = 'agent_research_gaps'
-                   AND COALESCE(e.deleted_at, '') = ''
-                 ORDER BY e.captured_at DESC
-                 LIMIT 1
-               ), '') AS research_gaps
-        FROM locations l
-        WHERE COALESCE(l.deleted_at, '') = ''
-          AND COALESCE(l.website_domain, '') <> ''
-          AND COALESCE((
-            SELECT e.field_value
-            FROM evidence e
-            WHERE e.entity_type = 'location'
-              AND e.entity_pk = l.location_pk
-              AND e.field_name = 'agent_research_status'
-              AND COALESCE(e.deleted_at, '') = ''
-            ORDER BY e.captured_at DESC
-            LIMIT 1
-          ), 'research_needed') <> 'ready'
-        ORDER BY score DESC, l.updated_at DESC
+    "contradictions": """
+        SELECT c.field_name, c.preferred_value, c.conflicting_value, c.preferred_source_url, c.conflicting_source_url,
+               pr.provider_name_snapshot AS provider_name, pr.practice_name_snapshot AS practice_name
+        FROM contradictions c
+        INNER JOIN provider_practice_records pr ON pr.record_id = c.record_id
+        ORDER BY c.created_at DESC
         LIMIT ?
     """,
 }
@@ -169,80 +88,6 @@ def _file_snapshot(path: Path) -> dict[str, Any]:
     }
 
 
-def _external_research_summary(out_dir: Path) -> dict[str, Any]:
-    dossier_dir = out_dir / "lead_intelligence"
-    manifest_path = dossier_dir / "lead_intelligence_manifest.json"
-    manifest = _read_json(manifest_path) or {}
-    packages = list(manifest.get("packages") or [])
-    package_rows: list[dict[str, Any]] = []
-    counts = {
-        "pending": 0,
-        "in_progress": 0,
-        "completed": 0,
-        "failed": 0,
-        "contract_missing": 0,
-        "invalid": 0,
-    }
-    completed_with_report_count = 0
-
-    for package in packages:
-        if not isinstance(package, dict):
-            continue
-        package_dir_rel = str(package.get("package_dir") or "").strip()
-        if not package_dir_rel:
-            continue
-        package_dir = dossier_dir / package_dir_rel
-        status_rel = str(package.get("external_research_status") or f"{package_dir_rel}/external_research_status.json")
-        report_rel = str(package.get("external_research_report") or f"{package_dir_rel}/external_research_report.md")
-        status_path = dossier_dir / status_rel
-        report_path = dossier_dir / report_rel
-        status_payload = _read_json(status_path) if status_path.exists() else None
-        raw_status = str((status_payload or {}).get("status") or "").strip().lower()
-        if not status_path.exists():
-            status = "contract_missing"
-        elif raw_status in EXTERNAL_RESEARCH_ALLOWED_STATUSES:
-            status = raw_status
-        else:
-            status = "invalid"
-        counts[status] = int(counts.get(status, 0)) + 1
-        report_exists = report_path.exists()
-        if status == "completed" and report_exists:
-            completed_with_report_count += 1
-        package_rows.append(
-            {
-                "lead_id": str(package.get("lead_id") or ""),
-                "company_name": str(package.get("company_name") or ""),
-                "package_dir": str(package_dir),
-                "status": status,
-                "status_file": str(status_path),
-                "status_file_exists": status_path.exists(),
-                "report_path": str(report_path),
-                "report_exists": report_exists,
-                "agent_name": str((status_payload or {}).get("agent_name") or ""),
-                "started_at": str((status_payload or {}).get("started_at") or ""),
-                "completed_at": str((status_payload or {}).get("completed_at") or ""),
-                "updated_at": str((status_payload or {}).get("updated_at") or ""),
-                "source_count": int((status_payload or {}).get("source_count") or 0),
-                "last_error": str((status_payload or {}).get("last_error") or ""),
-            }
-        )
-
-    return {
-        "manifest_path": str(manifest_path),
-        "manifest_exists": manifest_path.exists(),
-        "contract_version": str(manifest.get("external_research_contract_version") or ""),
-        "package_count": len(package_rows),
-        "pending_count": counts["pending"],
-        "in_progress_count": counts["in_progress"],
-        "completed_count": counts["completed"],
-        "failed_count": counts["failed"],
-        "completed_with_report_count": completed_with_report_count,
-        "contract_missing_count": counts["contract_missing"],
-        "invalid_count": counts["invalid"],
-        "packages": package_rows,
-    }
-
-
 def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -> dict[str, Any]:
     manifest = _read_json(MANIFEST_PATH) or {}
     checkpoint = None
@@ -259,145 +104,88 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
     if control_run_id:
         try:
             control_summary = summarize_run_control(load_run_control(control_run_id, run_state_dir))
-        except Exception:
+        except FileNotFoundError:
             control_summary = {}
 
-    db_summary: dict[str, Any] = {}
-    recent_failures: list[dict[str, Any]] = []
-    if Path(db_path).expanduser().resolve().exists():
-        con = _connect_readonly(db_path)
-        db_summary = {
-            "locations": con.execute("SELECT COUNT(*) FROM locations WHERE COALESCE(deleted_at,'')=''").fetchone()[0],
-            "lead_scores": con.execute("SELECT COUNT(*) FROM lead_scores WHERE COALESCE(deleted_at,'')=''").fetchone()[0],
-            "contacts": con.execute("SELECT COUNT(*) FROM contacts WHERE COALESCE(deleted_at,'')=''").fetchone()[0],
-            "crawl_jobs": con.execute("SELECT COUNT(*) FROM crawl_jobs").fetchone()[0],
-        }
-        recent_failures = [
-            dict(row)
-            for row in con.execute(
-                """
-                SELECT seed_domain, last_status_code, last_run_status,
-                       last_run_success_pages, last_run_failure_pages, last_run_completed_at
-                FROM seed_telemetry
-                WHERE last_run_success_pages = 0
-                   OR last_status_code IN (401, 403, 429, 503)
-                ORDER BY last_run_completed_at DESC, seed_domain ASC
-                LIMIT 10
-                """
-            ).fetchall()
-        ]
-        con.close()
+    con = _connect_readonly(db_path)
+    counts = {
+        "providers": int(con.execute("SELECT COUNT(*) FROM providers").fetchone()[0]),
+        "practices": int(con.execute("SELECT COUNT(*) FROM practices").fetchone()[0]),
+        "records": int(con.execute("SELECT COUNT(*) FROM provider_practice_records").fetchone()[0]),
+        "approved_records": int(con.execute("SELECT COUNT(*) FROM provider_practice_records WHERE export_status='approved'").fetchone()[0]),
+        "review_queue": int(con.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0]),
+        "contradictions": int(con.execute("SELECT COUNT(*) FROM contradictions").fetchone()[0]),
+    }
+    con.close()
+
+    latest_records = None
+    if OUT_DIR.exists():
+        candidates = sorted(OUT_DIR.glob("provider_records_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)
+        latest_records = _file_snapshot(candidates[0]) if candidates else None
 
     return {
-        "db": {"path": str(Path(db_path).expanduser().resolve()), **db_summary},
         "manifest": manifest,
         "checkpoint": checkpoint or {},
         "control": control_summary,
-        "external_research": _external_research_summary(OUT_DIR),
         "lock": _file_snapshot(LOCK_PATH),
+        "counts": counts,
         "outputs": {
-            "research_queue": _file_snapshot(OUT_DIR / "research_queue.csv"),
-            "agent_research_queue": _file_snapshot(OUT_DIR / "agent_research_queue.csv"),
-            "lead_intelligence_index": _file_snapshot(OUT_DIR / "lead_intelligence" / "lead_intelligence_index.csv"),
-            "lead_intelligence_table": _file_snapshot(OUT_DIR / "lead_intelligence" / "lead_intelligence_table.md"),
-            "lead_intelligence_manifest": _file_snapshot(OUT_DIR / "lead_intelligence" / "lead_intelligence_manifest.json"),
-            "outreach_legacy": _file_snapshot(OUT_DIR / "outreach_dispensary_100.csv"),
-            "quality": _file_snapshot(OUT_DIR / "quality_report.json"),
+            "records_csv": latest_records or _file_snapshot(OUT_DIR / "missing.csv"),
+            "records_json": _file_snapshot(next(iter(sorted(OUT_DIR.glob("provider_records_*.json"), key=lambda path: path.stat().st_mtime, reverse=True)), OUT_DIR / "missing.json")),
+            "review_queue_csv": _file_snapshot(next(iter(sorted(OUT_DIR.glob("review_queue_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)), OUT_DIR / "missing_review.csv")),
+            "profiles_dir": _file_snapshot(OUT_DIR / "profiles"),
+            "evidence_dir": _file_snapshot(OUT_DIR / "evidence"),
         },
-        "recent_failures": recent_failures,
-    }
-
-
-def _validate_readonly_query(query: str) -> str:
-    sql = (query or "").strip()
-    if not sql:
-        raise DataValidationError("SQL query cannot be empty.")
-    if sql.count(";") > 1 or (sql.endswith(";") and ";" in sql[:-1]):
-        raise DataValidationError("Only a single SELECT statement is allowed.")
-    normalized = sql.rstrip(";").strip().lower()
-    if not normalized.startswith(READ_ONLY_PREFIXES):
-        raise DataValidationError("SQL command must start with SELECT or WITH.")
-    if any(term in normalized for term in FORBIDDEN_SQL_TERMS):
-        raise DataValidationError("SQL command must be read-only.")
-    return sql.rstrip(";")
-
-
-def run_sql(*, db_path: str, query: str, limit: int) -> dict[str, Any]:
-    sql = _validate_readonly_query(query)
-    con = _connect_readonly(db_path)
-    cursor = con.execute(sql)
-    rows = cursor.fetchmany(max(1, limit))
-    columns = [col[0] for col in (cursor.description or [])]
-    payload_rows = [dict(zip(columns, row)) for row in rows]
-    con.close()
-    return {
-        "query": sql,
-        "row_count": len(payload_rows),
-        "limit": max(1, limit),
-        "columns": columns,
-        "rows": payload_rows,
     }
 
 
 def run_search(*, db_path: str, query: str | None, preset: str | None, limit: int) -> dict[str, Any]:
     con = _connect_readonly(db_path)
-    if preset:
-        if preset not in PRESET_QUERIES:
-            con.close()
-            raise DataValidationError(
-                f"Unknown search preset: {preset}",
-                details={"available_presets": sorted(PRESET_QUERIES)},
-            )
-        rows = [dict(row) for row in con.execute(PRESET_QUERIES[preset], (max(1, limit),)).fetchall()]
-        con.close()
-        return {"preset": preset, "row_count": len(rows), "rows": rows}
+    try:
+        if preset:
+            sql = PRESET_QUERIES.get(preset)
+            if not sql:
+                raise DataValidationError(f"Unknown search preset: {preset}")
+            rows = [dict(row) for row in con.execute(sql, (limit,)).fetchall()]
+            return {"preset": preset, "row_count": len(rows), "rows": rows}
 
-    search_term = (query or "").strip()
-    if not search_term:
+        needle = (query or "").strip().lower()
+        if not needle:
+            raise DataValidationError("Search query is required when no preset is provided.")
+        rows = [
+            dict(row)
+            for row in con.execute(
+                """
+                SELECT provider_name_snapshot AS provider_name, practice_name_snapshot AS practice_name,
+                       license_status, diagnoses_asd, diagnoses_adhd, prescriptive_authority, record_confidence
+                FROM provider_practice_records
+                WHERE lower(provider_name_snapshot) LIKE ?
+                   OR lower(practice_name_snapshot) LIKE ?
+                ORDER BY record_confidence DESC, provider_name_snapshot ASC
+                LIMIT ?
+                """,
+                (f"%{needle}%", f"%{needle}%", limit),
+            ).fetchall()
+        ]
+        return {"query": query, "row_count": len(rows), "rows": rows}
+    finally:
         con.close()
-        raise DataValidationError("Provide a text query or `--preset` for search.")
 
-    like_value = f"%{search_term.lower()}%"
-    rows = [
-        dict(row)
-        for row in con.execute(
-            """
-            SELECT l.canonical_name AS company_name,
-                   l.website_domain AS website,
-                   l.state,
-                   COALESCE(MAX(ls.score_total), 0) AS score,
-                   COALESCE(MAX(ls.tier), 'C') AS tier,
-                   COALESCE(MAX(c.full_name), '') AS contact_name,
-                   COALESCE(MAX(c.role), '') AS contact_role
-            FROM locations l
-            LEFT JOIN lead_scores ls ON ls.location_pk = l.location_pk
-            LEFT JOIN contacts c ON c.location_pk = l.location_pk AND COALESCE(c.deleted_at, '') = ''
-            LEFT JOIN evidence e ON e.entity_pk = l.location_pk AND COALESCE(e.deleted_at, '') = ''
-            WHERE COALESCE(l.deleted_at, '') = ''
-              AND (
-                lower(l.canonical_name) LIKE ?
-                OR lower(l.website_domain) LIKE ?
-                OR lower(COALESCE(c.full_name, '')) LIKE ?
-                OR lower(COALESCE(c.role, '')) LIKE ?
-                OR lower(COALESCE(c.email, '')) LIKE ?
-                OR lower(COALESCE(e.field_value, '')) LIKE ?
-                OR lower(COALESCE(e.source_url, '')) LIKE ?
-              )
-            GROUP BY l.location_pk, l.canonical_name, l.website_domain, l.state
-            ORDER BY COALESCE(MAX(ls.score_total), 0) DESC, l.updated_at DESC
-            LIMIT ?
-            """,
-            (
-                like_value,
-                like_value,
-                like_value,
-                like_value,
-                like_value,
-                like_value,
-                like_value,
-                max(1, limit),
-            ),
-        ).fetchall()
-    ]
-    con.close()
-    return {"query": search_term, "row_count": len(rows), "rows": rows}
+
+def run_sql(*, db_path: str, query: str, limit: int) -> dict[str, Any]:
+    normalized = (query or "").strip()
+    if not normalized:
+        raise DataValidationError("SQL query is required.")
+    lowered = normalized.lower()
+    if not lowered.startswith(READ_ONLY_PREFIXES):
+        raise DataValidationError("SQL command must start with SELECT or WITH.")
+    if any(term in lowered for term in FORBIDDEN_SQL_TERMS):
+        raise DataValidationError("SQL command must be read-only.")
+
+    con = _connect_readonly(db_path)
+    try:
+        rows = con.execute(f"SELECT * FROM ({normalized}) LIMIT ?", (limit,)).fetchall()
+        data = [dict(row) for row in rows]
+        return {"query": normalized, "row_count": len(data), "rows": data}
+    finally:
+        con.close()

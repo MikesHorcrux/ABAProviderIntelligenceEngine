@@ -1,0 +1,116 @@
+{
+  "schema_version": "seed_pack.v1",
+  "state": "NJ",
+  "sources": [
+    {
+      "name": "NJ BME Physician Search",
+      "website": "https://www.njconsumeraffairs.gov/bme/Pages/default.aspx",
+      "state": "NJ",
+      "metro": "statewide",
+      "tier": "A",
+      "source_type": "licensing_board",
+      "browser_required": false,
+      "extraction_profile": "board",
+      "priority": 120
+    },
+    {
+      "name": "NJ Psychology Board",
+      "website": "https://www.njconsumeraffairs.gov/psy/Pages/default.aspx",
+      "state": "NJ",
+      "metro": "statewide",
+      "tier": "A",
+      "source_type": "licensing_board",
+      "browser_required": false,
+      "extraction_profile": "board",
+      "priority": 118
+    },
+    {
+      "name": "NJ Nursing Board",
+      "website": "https://www.njconsumeraffairs.gov/nur/Pages/default.aspx",
+      "state": "NJ",
+      "metro": "statewide",
+      "tier": "A",
+      "source_type": "licensing_board",
+      "browser_required": false,
+      "extraction_profile": "board",
+      "priority": 116
+    },
+    {
+      "name": "NJ Autism Registry",
+      "website": "https://www.nj.gov/humanservices/ddd/individuals/community/autism/",
+      "state": "NJ",
+      "metro": "statewide",
+      "tier": "A",
+      "source_type": "state_registry",
+      "browser_required": false,
+      "extraction_profile": "registry",
+      "priority": 114
+    },
+    {
+      "name": "Hackensack Meridian Autism Center",
+      "website": "https://www.hackensackmeridianhealth.org/en/services/childrens-health/autism-center",
+      "state": "NJ",
+      "metro": "Newark",
+      "tier": "A",
+      "source_type": "hospital_directory",
+      "browser_required": true,
+      "extraction_profile": "hospital",
+      "priority": 110
+    },
+    {
+      "name": "Rutgers Center for Autism",
+      "website": "https://gsapp.rutgers.edu/centers-clinics/center-adult-autism-services",
+      "state": "NJ",
+      "metro": "Newark",
+      "tier": "B",
+      "source_type": "university_directory",
+      "browser_required": false,
+      "extraction_profile": "hospital",
+      "priority": 102
+    },
+    {
+      "name": "Children's Specialized Hospital Autism Services",
+      "website": "https://www.rwjbh.org/childrens-specialized-hospital/treatment-care/autism-and-developmental-disabilities/",
+      "state": "NJ",
+      "metro": "Edison-New Brunswick",
+      "tier": "B",
+      "source_type": "hospital_directory",
+      "browser_required": true,
+      "extraction_profile": "hospital",
+      "priority": 101
+    },
+    {
+      "name": "Horizon Behavioral Health Directory",
+      "website": "https://www.horizonblue.com/members/health-programs/behavioral-health",
+      "state": "NJ",
+      "metro": "statewide",
+      "tier": "B",
+      "source_type": "insurer_directory",
+      "browser_required": true,
+      "extraction_profile": "directory",
+      "priority": 96
+    },
+    {
+      "name": "Psychology Today New Jersey",
+      "website": "https://www.psychologytoday.com/us/therapists/nj",
+      "state": "NJ",
+      "metro": "statewide",
+      "tier": "C",
+      "source_type": "professional_directory",
+      "browser_required": true,
+      "extraction_profile": "directory",
+      "priority": 84
+    },
+    {
+      "name": "Behavioral Interventions Practice Search",
+      "website": "https://www.behavioralinterventions.com/",
+      "state": "NJ",
+      "metro": "statewide",
+      "tier": "C",
+      "source_type": "practice_site",
+      "browser_required": true,
+      "extraction_profile": "practice",
+      "priority": 72
+    }
+  ]
+}

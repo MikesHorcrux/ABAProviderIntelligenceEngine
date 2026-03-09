@@ -1,0 +1,71 @@
+{
+  "schema_version": "prescriber_rules.v1",
+  "state": "NJ",
+  "rules": [
+    {
+      "rule_id": "nj_md_do",
+      "state": "NJ",
+      "credential": "MD/DO",
+      "license_type": "physician",
+      "authority": "yes",
+      "limitations": "",
+      "rationale": "Licensed physicians in New Jersey may prescribe within the ordinary scope of medical practice.",
+      "citation_title": "New Jersey Board of Medical Examiners",
+      "citation_url": "https://www.njconsumeraffairs.gov/bme/Pages/default.aspx",
+      "retrieved_at": "2026-03-09T00:00:00Z",
+      "active": true
+    },
+    {
+      "rule_id": "nj_psyd_phd",
+      "state": "NJ",
+      "credential": "PsyD/PhD",
+      "license_type": "psychologist",
+      "authority": "no",
+      "limitations": "Psychologists in New Jersey do not hold independent prescriptive authority.",
+      "rationale": "Psychologist licensure does not include prescribing authority in New Jersey.",
+      "citation_title": "New Jersey Board of Psychological Examiners",
+      "citation_url": "https://www.njconsumeraffairs.gov/psy/Pages/default.aspx",
+      "retrieved_at": "2026-03-09T00:00:00Z",
+      "active": true
+    },
+    {
+      "rule_id": "nj_apn",
+      "state": "NJ",
+      "credential": "APN/NP",
+      "license_type": "advanced_practice_nurse",
+      "authority": "limited",
+      "limitations": "Advanced practice nurses may prescribe subject to New Jersey collaborative and formulary requirements.",
+      "rationale": "New Jersey APNs have prescriptive authority under state nursing rules, but it is not title-only and should be surfaced as limited unless the source clarifies the prescriber role.",
+      "citation_title": "New Jersey Advanced Practice Nursing",
+      "citation_url": "https://www.njconsumeraffairs.gov/nur/Pages/default.aspx",
+      "retrieved_at": "2026-03-09T00:00:00Z",
+      "active": true
+    },
+    {
+      "rule_id": "nj_pa",
+      "state": "NJ",
+      "credential": "PA",
+      "license_type": "physician_assistant",
+      "authority": "limited",
+      "limitations": "Physician assistants prescribe under delegated physician supervision and documented scope.",
+      "rationale": "New Jersey physician assistant prescribing is delegated and should remain limited unless directly evidenced.",
+      "citation_title": "New Jersey Physician Assistant Advisory Committee",
+      "citation_url": "https://www.njconsumeraffairs.gov/pa/Pages/default.aspx",
+      "retrieved_at": "2026-03-09T00:00:00Z",
+      "active": true
+    },
+    {
+      "rule_id": "nj_lcsw",
+      "state": "NJ",
+      "credential": "LCSW",
+      "license_type": "clinical_social_worker",
+      "authority": "no",
+      "limitations": "Clinical social worker licensure does not carry prescriptive authority.",
+      "rationale": "Behavioral health licensure alone does not imply prescribing authority.",
+      "citation_title": "New Jersey Social Work Examiners",
+      "citation_url": "https://www.njconsumeraffairs.gov/sw/Pages/default.aspx",
+      "retrieved_at": "2026-03-09T00:00:00Z",
+      "active": true
+    }
+  ]
+}

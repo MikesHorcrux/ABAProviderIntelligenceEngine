@@ -1,157 +1,229 @@
--- CannaRadar production schema (v1.5)
+-- Provider Intelligence schema (provider_intel.v1)
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 6;
+PRAGMA user_version = 1;
 
-CREATE TABLE IF NOT EXISTS organizations (
-  org_pk TEXT PRIMARY KEY NOT NULL,
-  legal_name TEXT NOT NULL DEFAULT '',
-  dba_name TEXT NOT NULL DEFAULT '',
-  state TEXT,
-  created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
-  last_seen_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  CHECK (length(org_pk) > 0)
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  schema_version INTEGER PRIMARY KEY NOT NULL,
+  migration_name TEXT NOT NULL,
+  schema_checksum TEXT NOT NULL,
+  applied_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS companies (
-  company_pk TEXT PRIMARY KEY NOT NULL,
-  organization_pk TEXT NOT NULL,
-  legal_name TEXT NOT NULL DEFAULT '',
-  dba_name TEXT NOT NULL DEFAULT '',
-  state TEXT,
+CREATE TABLE IF NOT EXISTS providers (
+  provider_id TEXT PRIMARY KEY NOT NULL,
+  provider_name TEXT NOT NULL DEFAULT '',
+  credentials TEXT NOT NULL DEFAULT '',
+  npi TEXT NOT NULL DEFAULT '',
+  primary_license_state TEXT NOT NULL DEFAULT '',
+  primary_license_type TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_providers_npi ON providers(npi);
+CREATE INDEX IF NOT EXISTS idx_providers_name ON providers(provider_name);
+
+CREATE TABLE IF NOT EXISTS practices (
+  practice_id TEXT PRIMARY KEY NOT NULL,
+  practice_name TEXT NOT NULL DEFAULT '',
+  website TEXT NOT NULL DEFAULT '',
+  intake_url TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  fax TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_practices_name_website ON practices(practice_name, website);
+
+CREATE TABLE IF NOT EXISTS practice_locations (
+  location_id TEXT PRIMARY KEY NOT NULL,
+  practice_id TEXT NOT NULL,
+  address_1 TEXT NOT NULL DEFAULT '',
+  city TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT '',
+  zip TEXT NOT NULL DEFAULT '',
+  metro TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  telehealth TEXT NOT NULL DEFAULT 'unknown',
   created_at TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT '',
-  last_seen_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  CHECK (length(company_pk) > 0),
-  FOREIGN KEY (organization_pk) REFERENCES organizations(org_pk) ON DELETE CASCADE
+  FOREIGN KEY (practice_id) REFERENCES practices(practice_id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_practice_locations_practice ON practice_locations(practice_id);
+CREATE INDEX IF NOT EXISTS idx_practice_locations_state ON practice_locations(state);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_practice_location_identity
+  ON practice_locations(practice_id, city, state, COALESCE(NULLIF(phone, ''), '<blank>'));
 
 CREATE TABLE IF NOT EXISTS licenses (
-  license_pk TEXT PRIMARY KEY NOT NULL,
-  org_pk TEXT NOT NULL,
-  state TEXT,
-  license_id TEXT,
-  license_type TEXT,
-  status TEXT NOT NULL DEFAULT 'unknown',
+  license_id TEXT PRIMARY KEY NOT NULL,
+  provider_id TEXT NOT NULL,
+  license_state TEXT NOT NULL DEFAULT '',
+  license_type TEXT NOT NULL DEFAULT '',
+  license_number TEXT NOT NULL DEFAULT '',
+  license_status TEXT NOT NULL DEFAULT 'unknown',
   source_url TEXT NOT NULL DEFAULT '',
   retrieved_at TEXT NOT NULL DEFAULT '',
-  fingerprint TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  FOREIGN KEY (org_pk) REFERENCES organizations(org_pk) ON DELETE CASCADE
+  FOREIGN KEY (provider_id) REFERENCES providers(provider_id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_licenses_provider ON licenses(provider_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_license_identity
+  ON licenses(provider_id, license_state, license_type, COALESCE(NULLIF(license_number, ''), '<blank>'));
 
-CREATE INDEX IF NOT EXISTS idx_licenses_org_pk ON licenses(org_pk);
-CREATE INDEX IF NOT EXISTS idx_licenses_state ON licenses(state);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_licenses_org_pk_state_license_id ON licenses(org_pk, state, COALESCE(NULLIF(license_id, ''), '<manual>'));
-
-CREATE TABLE IF NOT EXISTS locations (
-  location_pk TEXT PRIMARY KEY NOT NULL,
-  org_pk TEXT NOT NULL,
-  canonical_name TEXT NOT NULL DEFAULT '',
-  address_1 TEXT NOT NULL DEFAULT '',
-  city TEXT,
-  state TEXT NOT NULL DEFAULT '',
-  zip TEXT,
-  website_domain TEXT NOT NULL DEFAULT '',
-  phone TEXT,
-  fit_score INTEGER DEFAULT 0,
-  last_crawled_at TEXT,
+CREATE TABLE IF NOT EXISTS provider_practice_records (
+  record_id TEXT PRIMARY KEY NOT NULL,
+  provider_id TEXT NOT NULL,
+  practice_id TEXT NOT NULL,
+  location_id TEXT NOT NULL,
+  provider_name_snapshot TEXT NOT NULL DEFAULT '',
+  practice_name_snapshot TEXT NOT NULL DEFAULT '',
+  npi TEXT NOT NULL DEFAULT '',
+  license_state TEXT NOT NULL DEFAULT '',
+  license_type TEXT NOT NULL DEFAULT '',
+  license_status TEXT NOT NULL DEFAULT 'unknown',
+  diagnoses_asd TEXT NOT NULL DEFAULT 'unclear',
+  diagnoses_adhd TEXT NOT NULL DEFAULT 'unclear',
+  prescriptive_authority TEXT NOT NULL DEFAULT 'unknown',
+  prescriptive_basis TEXT NOT NULL DEFAULT '',
+  age_groups_json TEXT NOT NULL DEFAULT '[]',
+  telehealth TEXT NOT NULL DEFAULT 'unknown',
+  insurance_notes TEXT NOT NULL DEFAULT '',
+  waitlist_notes TEXT NOT NULL DEFAULT '',
+  referral_requirements TEXT NOT NULL DEFAULT '',
+  source_urls_json TEXT NOT NULL DEFAULT '[]',
+  field_confidence_json TEXT NOT NULL DEFAULT '{}',
+  record_confidence REAL NOT NULL DEFAULT 0.0,
+  conflict_note TEXT NOT NULL DEFAULT '',
+  review_status TEXT NOT NULL DEFAULT 'pending',
+  export_status TEXT NOT NULL DEFAULT 'pending',
+  blocked_reason TEXT NOT NULL DEFAULT '',
+  last_verified_at TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT '',
-  last_seen_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  CHECK (fit_score BETWEEN 0 AND 100),
-  CHECK (length(location_pk) > 0),
-  FOREIGN KEY (org_pk) REFERENCES organizations(org_pk) ON DELETE CASCADE
+  FOREIGN KEY (provider_id) REFERENCES providers(provider_id) ON DELETE CASCADE,
+  FOREIGN KEY (practice_id) REFERENCES practices(practice_id) ON DELETE CASCADE,
+  FOREIGN KEY (location_id) REFERENCES practice_locations(location_id) ON DELETE CASCADE,
+  CHECK (record_confidence >= 0 AND record_confidence <= 1)
 );
+CREATE INDEX IF NOT EXISTS idx_provider_practice_records_provider ON provider_practice_records(provider_id);
+CREATE INDEX IF NOT EXISTS idx_provider_practice_records_practice ON provider_practice_records(practice_id);
+CREATE INDEX IF NOT EXISTS idx_provider_practice_records_review ON provider_practice_records(review_status, export_status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_practice_identity
+  ON provider_practice_records(provider_id, practice_id, location_id);
 
-CREATE INDEX IF NOT EXISTS idx_locations_org_pk ON locations(org_pk);
-CREATE INDEX IF NOT EXISTS idx_locations_state ON locations(state);
-CREATE INDEX IF NOT EXISTS idx_locations_website_domain ON locations(website_domain);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_org_name ON locations(org_pk, canonical_name, state, COALESCE(NULLIF(website_domain, ''), '<no_domain>'));
-CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_website_domain_phone ON locations(COALESCE(NULLIF(website_domain, ''), '<no_domain>'), COALESCE(NULLIF(phone, ''), '<no_phone>'), state);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_locations_address ON locations(org_pk, COALESCE(NULLIF(address_1, ''), '<no_address>'), city, state, zip);
-
-CREATE TABLE IF NOT EXISTS domains (
-  domain_pk TEXT PRIMARY KEY NOT NULL,
-  location_pk TEXT NOT NULL,
-  domain TEXT NOT NULL DEFAULT '',
-  is_primary INTEGER NOT NULL DEFAULT 1,
-  confidence REAL NOT NULL DEFAULT 0.6,
+CREATE TABLE IF NOT EXISTS source_documents (
+  source_document_id TEXT PRIMARY KEY NOT NULL,
+  crawl_job_pk TEXT NOT NULL DEFAULT '',
   source_url TEXT NOT NULL DEFAULT '',
-  last_seen_at TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  CHECK (length(domain_pk) > 0),
-  FOREIGN KEY (location_pk) REFERENCES locations(location_pk) ON DELETE CASCADE
+  normalized_url TEXT NOT NULL DEFAULT '',
+  source_tier TEXT NOT NULL DEFAULT '',
+  source_type TEXT NOT NULL DEFAULT '',
+  extraction_profile TEXT NOT NULL DEFAULT '',
+  status_code INTEGER NOT NULL DEFAULT 0,
+  content_hash TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  snapshot_path TEXT NOT NULL DEFAULT '',
+  fetched_at TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_domains_domain ON domains(domain);
-CREATE INDEX IF NOT EXISTS idx_domains_location_pk ON domains(location_pk);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_source_documents_url_hash
+  ON source_documents(normalized_url, content_hash);
+CREATE INDEX IF NOT EXISTS idx_source_documents_tier ON source_documents(source_tier, source_type);
 
-CREATE TABLE IF NOT EXISTS contacts (
-  contact_pk TEXT PRIMARY KEY NOT NULL,
-  location_pk TEXT NOT NULL,
-  full_name TEXT NOT NULL DEFAULT '',
-  role TEXT NOT NULL DEFAULT '',
-  email TEXT NOT NULL DEFAULT '',
+CREATE TABLE IF NOT EXISTS extracted_records (
+  extracted_id TEXT PRIMARY KEY NOT NULL,
+  source_document_id TEXT NOT NULL,
+  source_url TEXT NOT NULL DEFAULT '',
+  source_tier TEXT NOT NULL DEFAULT '',
+  source_type TEXT NOT NULL DEFAULT '',
+  extraction_profile TEXT NOT NULL DEFAULT '',
+  provider_name TEXT NOT NULL DEFAULT '',
+  credentials TEXT NOT NULL DEFAULT '',
+  npi TEXT NOT NULL DEFAULT '',
+  practice_name TEXT NOT NULL DEFAULT '',
+  intake_url TEXT NOT NULL DEFAULT '',
   phone TEXT NOT NULL DEFAULT '',
-  source_kind TEXT NOT NULL DEFAULT 'unknown',
-  confidence REAL NOT NULL DEFAULT 0.5,
-  verification_status TEXT NOT NULL DEFAULT 'unverified',
+  fax TEXT NOT NULL DEFAULT '',
+  address_1 TEXT NOT NULL DEFAULT '',
+  city TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT '',
+  zip TEXT NOT NULL DEFAULT '',
+  metro TEXT NOT NULL DEFAULT '',
+  license_state TEXT NOT NULL DEFAULT '',
+  license_type TEXT NOT NULL DEFAULT '',
+  license_status TEXT NOT NULL DEFAULT 'unknown',
+  diagnoses_asd TEXT NOT NULL DEFAULT 'unclear',
+  diagnoses_adhd TEXT NOT NULL DEFAULT 'unclear',
+  age_groups_json TEXT NOT NULL DEFAULT '[]',
+  telehealth TEXT NOT NULL DEFAULT 'unknown',
+  insurance_notes TEXT NOT NULL DEFAULT '',
+  waitlist_notes TEXT NOT NULL DEFAULT '',
+  referral_requirements TEXT NOT NULL DEFAULT '',
+  evidence_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
-  last_seen_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  CHECK (length(contact_pk) > 0),
-  CHECK (confidence >= 0 AND confidence <= 1),
-  FOREIGN KEY (location_pk) REFERENCES locations(location_pk) ON DELETE CASCADE
+  FOREIGN KEY (source_document_id) REFERENCES source_documents(source_document_id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_contacts_location_pk ON contacts(location_pk);
-CREATE INDEX IF NOT EXISTS idx_contacts_role ON contacts(role);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_email ON contacts(location_pk, COALESCE(NULLIF(email, ''), '<blank>'));
-CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_phone ON contacts(location_pk, COALESCE(NULLIF(phone, ''), '<blank>'));
+CREATE INDEX IF NOT EXISTS idx_extracted_records_source ON extracted_records(source_document_id);
 
-CREATE TABLE IF NOT EXISTS contact_points (
-  contact_pk TEXT PRIMARY KEY NOT NULL,
-  location_pk TEXT NOT NULL,
-  type TEXT NOT NULL,
-  value TEXT,
-  confidence REAL NOT NULL DEFAULT 0.0,
+CREATE TABLE IF NOT EXISTS field_evidence (
+  evidence_id TEXT PRIMARY KEY NOT NULL,
+  record_id TEXT NOT NULL,
+  field_name TEXT NOT NULL DEFAULT '',
+  field_value TEXT NOT NULL DEFAULT '',
+  quote TEXT NOT NULL DEFAULT '',
   source_url TEXT NOT NULL DEFAULT '',
-  first_seen_at TEXT NOT NULL DEFAULT '',
-  last_seen_at TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  CHECK (length(contact_pk) > 0),
-  CHECK (confidence >= 0 AND confidence <= 1),
-  FOREIGN KEY (location_pk) REFERENCES locations(location_pk) ON DELETE CASCADE
+  source_document_id TEXT NOT NULL DEFAULT '',
+  source_tier TEXT NOT NULL DEFAULT '',
+  captured_at TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY (record_id) REFERENCES provider_practice_records(record_id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_field_evidence_record ON field_evidence(record_id, field_name);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_field_evidence_identity
+  ON field_evidence(record_id, field_name, COALESCE(NULLIF(field_value, ''), '<blank>'), source_url);
 
-CREATE INDEX IF NOT EXISTS idx_contact_points_location_pk ON contact_points(location_pk);
-CREATE INDEX IF NOT EXISTS idx_contact_points_type ON contact_points(type);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_contact_points ON contact_points(location_pk, type, COALESCE(NULLIF(value, ''), '<blank>'));
-
-CREATE TABLE IF NOT EXISTS enrichment_sources (
-  enrichment_source_pk TEXT PRIMARY KEY NOT NULL,
-  source_type TEXT NOT NULL,
-  source_name TEXT NOT NULL,
-  source_url TEXT NOT NULL,
-  fetched_at TEXT NOT NULL,
-  success INTEGER NOT NULL DEFAULT 0,
-  payload_hash TEXT NOT NULL DEFAULT '',
-  status_code INTEGER DEFAULT 0,
-  error_message TEXT NOT NULL DEFAULT '',
+CREATE TABLE IF NOT EXISTS contradictions (
+  contradiction_id TEXT PRIMARY KEY NOT NULL,
+  record_id TEXT NOT NULL,
+  field_name TEXT NOT NULL DEFAULT '',
+  preferred_value TEXT NOT NULL DEFAULT '',
+  conflicting_value TEXT NOT NULL DEFAULT '',
+  preferred_source_url TEXT NOT NULL DEFAULT '',
+  conflicting_source_url TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT ''
+  FOREIGN KEY (record_id) REFERENCES provider_practice_records(record_id) ON DELETE CASCADE
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_enrichment_source ON enrichment_sources(source_type, source_name, source_url);
-CREATE INDEX IF NOT EXISTS idx_enrichment_sources_fetched_at ON enrichment_sources(fetched_at);
+CREATE INDEX IF NOT EXISTS idx_contradictions_record ON contradictions(record_id, field_name);
+
+CREATE TABLE IF NOT EXISTS review_queue (
+  review_id TEXT PRIMARY KEY NOT NULL,
+  record_id TEXT NOT NULL DEFAULT '',
+  review_type TEXT NOT NULL DEFAULT '',
+  provider_name TEXT NOT NULL DEFAULT '',
+  practice_name TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  source_url TEXT NOT NULL DEFAULT '',
+  evidence_quote TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status, review_type);
+
+CREATE TABLE IF NOT EXISTS prescriber_rules (
+  rule_id TEXT PRIMARY KEY NOT NULL,
+  schema_name TEXT NOT NULL DEFAULT 'prescriber_rules.v1',
+  state TEXT NOT NULL DEFAULT '',
+  credential TEXT NOT NULL DEFAULT '',
+  license_type TEXT NOT NULL DEFAULT '',
+  authority TEXT NOT NULL DEFAULT 'unknown',
+  limitations TEXT NOT NULL DEFAULT '',
+  rationale TEXT NOT NULL DEFAULT '',
+  citation_title TEXT NOT NULL DEFAULT '',
+  citation_url TEXT NOT NULL DEFAULT '',
+  retrieved_at TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_prescriber_rules_lookup ON prescriber_rules(state, credential, license_type, active);
 
 CREATE TABLE IF NOT EXISTS crawl_jobs (
   crawl_job_pk TEXT PRIMARY KEY NOT NULL,
@@ -160,11 +232,10 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
   status TEXT NOT NULL DEFAULT 'created',
   mode TEXT NOT NULL DEFAULT 'seed',
   last_status_code INTEGER NOT NULL DEFAULT 0,
-  started_at TEXT,
-  completed_at TEXT,
+  started_at TEXT NOT NULL DEFAULT '',
+  completed_at TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT ''
+  updated_at TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_crawl_jobs_seed_domain ON crawl_jobs(seed_domain);
 CREATE INDEX IF NOT EXISTS idx_crawl_jobs_status ON crawl_jobs(status);
@@ -179,21 +250,20 @@ CREATE TABLE IF NOT EXISTS seed_telemetry (
   failure_runs INTEGER NOT NULL DEFAULT 0,
   consecutive_failures INTEGER NOT NULL DEFAULT 0,
   last_status_code INTEGER NOT NULL DEFAULT 0,
-  last_success_at TEXT,
-  last_failure_at TEXT,
-  last_run_started_at TEXT,
-  last_run_completed_at TEXT,
+  last_success_at TEXT NOT NULL DEFAULT '',
+  last_failure_at TEXT NOT NULL DEFAULT '',
+  last_run_started_at TEXT NOT NULL DEFAULT '',
+  last_run_completed_at TEXT NOT NULL DEFAULT '',
   last_run_status TEXT NOT NULL DEFAULT 'unknown',
   last_run_pages_fetched INTEGER NOT NULL DEFAULT 0,
   last_run_success_pages INTEGER NOT NULL DEFAULT 0,
   last_run_failure_pages INTEGER NOT NULL DEFAULT 0,
   last_run_job_pk TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT ''
+  updated_at TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_seed_telemetry_last_success_at ON seed_telemetry(last_success_at);
-CREATE INDEX IF NOT EXISTS idx_seed_telemetry_failures ON seed_telemetry(consecutive_failures, last_failure_at);
+CREATE INDEX IF NOT EXISTS idx_seed_telemetry_failures
+  ON seed_telemetry(consecutive_failures, last_failure_at);
 
 CREATE TABLE IF NOT EXISTS crawl_results (
   crawl_result_pk TEXT PRIMARY KEY NOT NULL,
@@ -207,87 +277,8 @@ CREATE TABLE IF NOT EXISTS crawl_results (
   error_message TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (crawl_job_pk) REFERENCES crawl_jobs(crawl_job_pk) ON DELETE CASCADE
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_crawl_result_lookup ON crawl_results(target_url, content_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crawl_result_lookup
+  ON crawl_results(target_url, content_hash);
 CREATE INDEX IF NOT EXISTS idx_crawl_results_job ON crawl_results(crawl_job_pk);
-
-CREATE TABLE IF NOT EXISTS evidence (
-  evidence_pk TEXT PRIMARY KEY NOT NULL,
-  entity_type TEXT,
-  entity_pk TEXT,
-  field_name TEXT NOT NULL DEFAULT '',
-  field_value TEXT NOT NULL DEFAULT '',
-  source_url TEXT NOT NULL DEFAULT '',
-  snippet TEXT,
-  captured_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  CHECK (length(evidence_pk) > 0)
-);
-
-CREATE INDEX IF NOT EXISTS idx_evidence_entity ON evidence(entity_type, entity_pk);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_evidence ON evidence(entity_type, entity_pk, field_name, COALESCE(NULLIF(field_value, ''), '<blank>'));
-
-CREATE TABLE IF NOT EXISTS entity_resolutions (
-  resolution_pk TEXT PRIMARY KEY NOT NULL,
-  canonical_location_pk TEXT NOT NULL,
-  candidate_location_pk TEXT NOT NULL,
-  resolution_status TEXT NOT NULL DEFAULT 'pending',
-  reason TEXT NOT NULL DEFAULT '',
-  confidence REAL NOT NULL DEFAULT 0.0,
-  created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  FOREIGN KEY (canonical_location_pk) REFERENCES locations(location_pk) ON DELETE CASCADE,
-  FOREIGN KEY (candidate_location_pk) REFERENCES locations(location_pk) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_entity_resolutions_status ON entity_resolutions(resolution_status);
-
-CREATE TABLE IF NOT EXISTS lead_scores (
-  score_pk TEXT PRIMARY KEY NOT NULL,
-  location_pk TEXT NOT NULL,
-  score_total INTEGER NOT NULL DEFAULT 0,
-  tier TEXT NOT NULL DEFAULT 'C',
-  run_id TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT '',
-  as_of TEXT NOT NULL DEFAULT '',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  FOREIGN KEY (location_pk) REFERENCES locations(location_pk) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_lead_scores_location ON lead_scores(location_pk);
-CREATE INDEX IF NOT EXISTS idx_lead_scores_tier ON lead_scores(tier);
-CREATE INDEX IF NOT EXISTS idx_lead_scores_as_of ON lead_scores(as_of);
-
-CREATE TABLE IF NOT EXISTS scoring_features (
-  feature_pk TEXT PRIMARY KEY NOT NULL,
-  score_pk TEXT NOT NULL,
-  feature_name TEXT NOT NULL DEFAULT '',
-  feature_value REAL NOT NULL DEFAULT 0.0,
-  created_at TEXT NOT NULL DEFAULT '',
-  CHECK (feature_value >= -1 AND feature_value <= 1),
-  FOREIGN KEY (score_pk) REFERENCES lead_scores(score_pk) ON DELETE CASCADE
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_score_features ON scoring_features(score_pk, feature_name);
-
-CREATE TABLE IF NOT EXISTS outreach_events (
-  event_pk TEXT PRIMARY KEY NOT NULL,
-  location_pk TEXT NOT NULL,
-  channel TEXT,
-  outcome TEXT,
-  notes TEXT,
-  created_at TEXT NOT NULL DEFAULT '',
-  created_by TEXT NOT NULL DEFAULT 'manual',
-  deleted_at TEXT NOT NULL DEFAULT '',
-  CHECK (length(event_pk) > 0),
-  FOREIGN KEY (location_pk) REFERENCES locations(location_pk) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_outreach_events_location_pk ON outreach_events(location_pk);
-
-CREATE TABLE IF NOT EXISTS schema_migrations (
-  schema_version INTEGER PRIMARY KEY,
-  migration_name TEXT NOT NULL,
-  schema_checksum TEXT NOT NULL,
-  applied_at TEXT NOT NULL
-);

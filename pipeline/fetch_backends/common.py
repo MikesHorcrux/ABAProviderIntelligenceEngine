@@ -167,8 +167,8 @@ def _upsert_seed_telemetry(
             success_runs, failure_runs, consecutive_failures, last_status_code,
             last_success_at, last_failure_at, last_run_started_at, last_run_completed_at,
             last_run_status, last_run_pages_fetched, last_run_success_pages, last_run_failure_pages,
-            last_run_job_pk, created_at, updated_at, deleted_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            last_run_job_pk, created_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(seed_domain) DO UPDATE SET
             seed_name = excluded.seed_name,
             attempts = attempts + excluded.attempts,
@@ -219,7 +219,6 @@ def _upsert_seed_telemetry(
             run_job_pk,
             run_completed_at,
             run_completed_at,
-            "",
         ),
     )
 
@@ -255,8 +254,8 @@ class SeedRunRecorder:
             """
             INSERT OR REPLACE INTO crawl_jobs (
                 crawl_job_pk, seed_name, seed_domain, status, mode, last_status_code,
-                started_at, completed_at, created_at, updated_at, deleted_at
-            ) VALUES (?,?,?,'running','seed',0,?,?,?,?,'')
+                started_at, completed_at, created_at, updated_at
+            ) VALUES (?,?,?,'running','seed',0,?,?,?,?)
             """,
             (
                 self.job_pk,

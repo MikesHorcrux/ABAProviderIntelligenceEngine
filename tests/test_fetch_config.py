@@ -42,7 +42,8 @@ def test_load_crawl_config_defaults_include_crawlee_settings() -> None:
     assert cfg.agent_research_enabled is True
     assert cfg.agent_research_limit == 25
     assert cfg.agent_research_min_score == 48
-    assert "/leadership" in cfg.agent_research_paths
+    assert cfg.seed_file == "seed_packs/nj/seed_pack.json"
+    assert "/diagnosis" in cfg.agent_research_paths
 
 
 def test_env_overrides_apply_to_crawlee_settings() -> None:
