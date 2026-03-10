@@ -1,5 +1,5 @@
 {
-  "userAgent": "ProviderIntelCrawler/1.0 (+local; evidence-first)",
+  "userAgent": "ABAProviderIntelligenceEngine/1.0 (+local; evidence-first)",
   "timeoutSeconds": 8.0,
   "maxRetries": 3,
   "retryDelaySeconds": 1.5,

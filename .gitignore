@@ -5,3 +5,10 @@ reports/
 pipeline_state/
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
+.DS_Store
+.env
+.env.local
+.env.*
+!.env.example

@@ -12,7 +12,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "crawler_config.j
 
 @dataclass
 class CrawlConfig:
-    user_agent: str = "ProviderIntelCrawler/1.0 (+local; evidence-first)"
+    user_agent: str = "ABAProviderIntelligenceEngine/1.0 (+local; evidence-first)"
     timeout_seconds: float = 8.0
     max_retries: int = 3
     retry_delay_seconds: float = 1.5

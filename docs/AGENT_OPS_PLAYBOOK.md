@@ -4,13 +4,21 @@ Last verified against commit `0c5e92b`.
 
 This file is the short operating contract for agents. Use the main docs set for detail.
 
+## Release Status
+
+- This repository is source-available public code, not OSI-open-source.
+- Read `../LICENSE` and `../NOTICE.md` before recommending reuse or redistribution.
+- Describe dependency licensing accurately in operator- or agent-facing output.
+- Treat `Rethink Autism, Inc.` and `RethinkFirst` as excluded from the project license.
+
 ## Read First
 
 1. [`../README.md`](../README.md)
-2. [`architecture.md`](architecture.md)
-3. [`runtime-and-pipeline.md`](runtime-and-pipeline.md)
-4. [`cli-reference.md`](cli-reference.md)
-5. [`operations.md`](operations.md)
+2. [`../AGENTS.md`](../AGENTS.md)
+3. [`architecture.md`](architecture.md)
+4. [`runtime-and-pipeline.md`](runtime-and-pipeline.md)
+5. [`cli-reference.md`](cli-reference.md)
+6. [`operations.md`](operations.md)
 
 ## Canonical Flow
 
@@ -30,6 +38,7 @@ python3.11 provider_intel_cli.py export --json --limit 100
 - Do not weaken QA to increase export counts.
 - Keep `record_confidence` and `outreach_fit_score` separate.
 - Use bounded runs before broadening seeds or page caps.
+- Keep fixtures synthetic; do not add copied third-party site captures.
 
 ## First Diagnostic Commands
 

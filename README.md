@@ -1,8 +1,49 @@
-# ABA Provider Intelligence Engine
+# ABAProviderIntelligenceEngine
 
 Last verified against commit `0c5e92b`.
 
 Evidence-backed provider intelligence for New Jersey autism and ADHD diagnostic pathways. The runtime crawls live provider sources, extracts explicit diagnostic and licensing signals, scores confidence, queues uncertain records for review, and exports profiles plus outreach-ready sales briefs.
+
+## Release Status
+
+This repository is source-available public code under the
+[`ABAProviderIntelligenceEngine Public Source License 1.0`](LICENSE).
+Everyone except the excluded entity named in the license is free to use,
+modify, and redistribute it under that license. Third-party dependencies keep
+their own licenses; see [`NOTICE.md`](NOTICE.md).
+
+Additional public-release notes:
+
+- `tests/fixtures/provider_intel/` contains synthetic fixtures, not copied site captures.
+- Generated crawl data, SQLite DBs, and export artifacts are intentionally kept out of git.
+- Proxy credentials and other operator secrets are not part of the public repo.
+- Contributor expectations are documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Purpose
+
+ABAProviderIntelligenceEngine exists to turn noisy public provider websites,
+licensing pages, and directory pages into an evidence-backed local dataset that
+an operator can trust.
+
+The intended outcome is not "more leads at any cost." The intended outcome is:
+
+- provider-practice records with source-backed ASD / ADHD diagnostic signals
+- explicit licensing and prescribing evidence where available
+- a review queue for uncertain or contradictory records
+- exportable profiles and outreach briefs only after QA passes
+
+In practice, this means the repository is built for research loops where an
+agent or operator can crawl, extract, score, inspect, resume, and export
+without weakening the evidence gate.
+
+## Primary Use Cases
+
+- Build a New Jersey provider intelligence dataset for ASD and ADHD diagnostic pathways.
+- Run bounded live crawls against known seed packs and resume interrupted runs.
+- Separate approved provider truth from practice-only signals and uncertain records.
+- Generate review queues for manual follow-up instead of forcing weak records into export.
+- Produce outreach-ready exports only for records that clear factual QA and outreach thresholds.
+- Give an AI agent a repeatable local workflow for end-to-end research operations.
 
 ## Who It Is For
 
@@ -22,8 +63,8 @@ The runtime is evidence-first. If a critical claim is not source-backed, QA bloc
 ## 5-Minute Quickstart
 
 ```bash
-git clone https://github.com/MikesHorcrux/CannaRadar.git
-cd CannaRadar
+git clone https://github.com/MikesHorcrux/ABAProviderIntelligenceEngine.git
+cd ABAProviderIntelligenceEngine
 python3.11 -m venv .venv
 source .venv/bin/activate
 python3.11 -m pip install -r requirements.txt
@@ -52,6 +93,49 @@ python3.11 provider_intel_cli.py search --json --preset outreach-ready
 python3.11 provider_intel_cli.py search --json --preset review-queue
 python3.11 provider_intel_cli.py control --json --run-id latest show
 python3.11 provider_intel_cli.py export --json --limit 100
+```
+
+## Full Agentic Research Loop
+
+If you want an AI agent to operate this repository end to end, give it the repo
+root, the seed scope, the run limits, and the output you expect. The agent
+should use the canonical CLI and keep the evidence-first safety rules intact.
+
+Minimum handoff:
+
+- Workspace: the repository root with Python 3.11 and Playwright installed
+- Scope: which geography, conditions, and seed pack to run
+- Bounds: `--max`, `--limit`, and whether the run should start fresh or resume
+- Goal: review queue triage, outreach-ready export generation, blocked-domain diagnosis, or a bounded validation run
+- Required outputs: status summary, control summary, review queue findings, export artifacts, or code changes
+- Constraints: never invent unsupported clinical or licensing claims; keep fixtures synthetic; do not commit generated data or secrets
+
+Recommended command loop for agents:
+
+```bash
+python3.11 provider_intel_cli.py init --json
+python3.11 provider_intel_cli.py doctor --json
+python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
+python3.11 provider_intel_cli.py status --json
+python3.11 provider_intel_cli.py search --json --preset review-queue
+python3.11 provider_intel_cli.py search --json --preset outreach-ready
+python3.11 provider_intel_cli.py control --json --run-id latest show
+python3.11 provider_intel_cli.py sync --json --resume latest
+python3.11 provider_intel_cli.py export --json --limit 100
+```
+
+How the loop should be used:
+
+- Start bounded, not broad. Small runs make blocked domains, bad seeds, and noisy extraction easier to diagnose.
+- Treat `review_queue` as a normal output lane, not a failure.
+- Use `control --run-id latest show` to inspect the current run before changing config or code.
+- Resume with `sync --resume latest` when a run was interrupted or when you want to continue from checkpoints.
+- Export only after QA has approved records; outreach readiness is downstream of truth.
+
+Example agent handoff prompt:
+
+```text
+Use ABAProviderIntelligenceEngine from the repo root. Run the canonical CLI for a bounded live research loop with seed_packs/examples/cassia_live_test.json, max 2, limit 10. Start with init and doctor, then run sync, status, review-queue search, outreach-ready search, and control show for the latest run. If the run is interrupted, resume latest instead of starting over. Summarize blocked domains, uncertain records, approved exports, and the next operator action. Do not weaken QA, do not fabricate unsupported ASD/ADHD or licensing claims, and do not commit generated data.
 ```
 
 ## Primary Outputs
@@ -88,6 +172,13 @@ Runs write to `out/provider_intel/`:
 - [`docs/testing-and-quality.md`](docs/testing-and-quality.md): test coverage, gaps, and release checks.
 - [`docs/faq.md`](docs/faq.md): short answers for operators, developers, and stakeholders.
 - [`docs/adr/`](docs/adr/): architecture decisions and tradeoffs.
+
+## For AI Agents
+
+Start with [`AGENTS.md`](AGENTS.md) and [`README_AI_AGENTS.md`](README_AI_AGENTS.md).
+Agents must preserve the evidence-first runtime behavior and must not describe
+this repository inaccurately. The correct public description is source-available
+public code with an excluded-entity restriction.
 
 ## Fast Validation Pack
 

@@ -1,0 +1,75 @@
+ABAProviderIntelligenceEngine Public Source License 1.0
+
+Copyright (c) 2026 ABAProviderIntelligenceEngine contributors
+
+This repository is published as publicly available source code under this
+license. Because this license excludes a specifically named entity and related
+parties, it is not an Open Source Initiative-approved license and the software
+must not be described as "open source."
+
+1. Definitions
+
+"Software" means the source code, documentation, test fixtures, and other
+materials made available in this repository.
+
+"Excluded Entity" means:
+
+- Rethink Autism, Inc.
+- Any company, division, product line, or business unit operating under the
+  "RethinkFirst" name or brand
+- Any parent, subsidiary, affiliate, successor, predecessor, assign,
+  contractor, or agent of an entity listed above, when acting for, on behalf
+  of, or for the benefit of that entity
+
+2. License Grant
+
+Subject to the terms of this license, the Licensor grants each recipient of the
+Software other than the Excluded Entity a worldwide, non-exclusive,
+non-transferable, revocable, royalty-free copyright license to use, copy,
+modify, publish, distribute, and sublicense the Software.
+
+3. Conditions
+
+The license grant in Section 2 is conditioned on all of the following:
+
+- You must include this license text and copyright notice in any copy or
+  substantial portion of the Software.
+- You must not remove or alter any notice describing the excluded-entity
+  restriction.
+- You receive no trademark rights under this license.
+
+4. Excluded-Entity Restriction
+
+No license is granted to the Excluded Entity. The Excluded Entity may not use,
+copy, modify, execute, host, access, evaluate, distribute, sublicense, sell,
+offer for sale, train on, benchmark against, create derivative works of, or
+otherwise exploit the Software, in whole or in part, for any purpose.
+
+Any purported use of the Software by the Excluded Entity is unlicensed,
+unauthorized, and prohibited.
+
+5. Third-Party Software
+
+This license applies only to the Software contributed to this repository by its
+contributors. Third-party dependencies, binaries, services, and other external
+materials remain subject to their own licenses and terms.
+
+6. Contributions
+
+Unless explicitly stated otherwise in writing, any contribution intentionally
+submitted for inclusion in the Software is licensed under this license.
+
+7. Termination
+
+Any breach of this license automatically terminates the rights granted by this
+license for the breaching party.
+
+8. Disclaimer
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -1,9 +1,9 @@
 ---
-name: provider-intel-repo
+name: aba-provider-intelligence-engine-repo
 description: Use for Provider Intelligence repository operations involving the agent-operable crawler, canonical CLI workflows, resumable runs, live-run diagnostics, and stage-safe pipeline edits.
 ---
 
-# Provider Intel Repo Skill
+# ABAProviderIntelligenceEngine Repo Skill
 
 Last verified against commit `0c5e92b`.
 
