@@ -125,13 +125,23 @@ def _dispatch(args) -> dict[str, object]:
     if args.command == "init":
         return execute_init(args)
     if args.command == "doctor":
-        return run_doctor(db_path=args.db, config_path=args.config, run_state_dir=args.checkpoint_dir)
+        return run_doctor(
+            db_path=args.db,
+            config_path=args.config,
+            run_state_dir=args.checkpoint_dir,
+            db_timeout_ms=args.db_timeout_ms,
+        )
     if args.command == "sync":
         return execute_sync(args)
     if args.command == "tail":
         return execute_tail(args)
     if args.command == "status":
-        return run_status(db_path=args.db, run_id=args.run_id, run_state_dir=args.checkpoint_dir)
+        return run_status(
+            db_path=args.db,
+            run_id=args.run_id,
+            run_state_dir=args.checkpoint_dir,
+            db_timeout_ms=args.db_timeout_ms,
+        )
     if args.command == "control":
         if args.control_action == "show":
             return run_control_show(run_id=args.run_id, run_state_dir=args.checkpoint_dir)
@@ -142,9 +152,20 @@ def _dispatch(args) -> dict[str, object]:
             action_value = args.max_pages
         return run_control_apply(run_id=args.run_id, run_state_dir=args.checkpoint_dir, action=args.control_action, domain=args.domain, value=action_value, reason=args.reason)
     if args.command == "sql":
-        return run_sql(db_path=args.db, query=args.query_flag or args.query or "", limit=args.limit)
+        return run_sql(
+            db_path=args.db,
+            query=args.query_flag or args.query or "",
+            limit=args.limit,
+            db_timeout_ms=args.db_timeout_ms,
+        )
     if args.command == "search":
-        return run_search(db_path=args.db, query=args.query, preset=args.preset, limit=args.limit)
+        return run_search(
+            db_path=args.db,
+            query=args.query,
+            preset=args.preset,
+            limit=args.limit,
+            db_timeout_ms=args.db_timeout_ms,
+        )
     if args.command == "export":
         return execute_export(args)
     raise RuntimeError(f"Unsupported command: {args.command}")
@@ -163,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.config:
             resolved = str(Path(args.config).expanduser().resolve())
             os.environ["PROVIDER_INTEL_CONFIG"] = resolved
+            os.environ["PROVIDER_INTEL_CRAWLER_CONFIG"] = resolved
             os.environ["CANNARADAR_CRAWLER_CONFIG"] = resolved
         command = args.command
         data = _dispatch(args)

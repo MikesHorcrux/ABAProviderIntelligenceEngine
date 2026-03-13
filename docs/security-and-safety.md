@@ -25,16 +25,17 @@ What it does not do:
 Supported config/env entrypoints:
 
 - `PROVIDER_INTEL_CONFIG`
-- `CANNARADAR_CRAWLER_CONFIG`
-- `CANNARADAR_DENYLIST`
-- `CANNARADAR_SEED_FILE`
-- `CANNARADAR_CRAWLEE_HEADLESS`
-- `CANNARADAR_CRAWLEE_PROXY_URLS`
-- `CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE`
+- `PROVIDER_INTEL_CRAWLER_CONFIG`
+- `PROVIDER_INTEL_DENYLIST`
+- `PROVIDER_INTEL_SEED_FILE`
+- `PROVIDER_INTEL_CRAWLEE_HEADLESS`
+- `PROVIDER_INTEL_CRAWLEE_PROXY_URLS`
+- `PROVIDER_INTEL_CRAWLEE_DOMAIN_POLICIES_FILE`
 
 Notes:
 
 - These are convenience config inputs, not a secret management system.
+- Legacy `CANNARADAR_*` aliases remain accepted for compatibility, but new automation should prefer the `PROVIDER_INTEL_*` names.
 - Proxy URLs may contain credentials depending on how the operator configures them, so treat config and shell history accordingly.
 - The current code does not redact config values before logging them elsewhere.
 

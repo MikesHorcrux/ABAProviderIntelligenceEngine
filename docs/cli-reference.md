@@ -9,8 +9,8 @@ The canonical CLI entrypoint is `provider_intel_cli.py`. The retired `cannaradar
 | Flag | Meaning | Notes |
 | --- | --- | --- |
 | `--db` | Alternate SQLite path | Defaults to `data/provider_intel_v1.db` |
-| `--db-timeout-ms` | Declared SQLite timeout | Accepted by `cli/app.py`, currently not consumed by `pipeline/db.py` |
-| `--config` | Alternate `crawler_config.json` | Also sets `PROVIDER_INTEL_CONFIG` and `CANNARADAR_CRAWLER_CONFIG` for the process |
+| `--db-timeout-ms` | SQLite timeout in milliseconds | Applied to writable and read-only CLI DB connections, and mirrored to `PRAGMA busy_timeout` |
+| `--config` | Alternate `crawler_config.json` | Also sets `PROVIDER_INTEL_CONFIG`, `PROVIDER_INTEL_CRAWLER_CONFIG`, and the legacy compatibility alias `CANNARADAR_CRAWLER_CONFIG` for the process |
 | `--json` | Emit strict JSON envelope | Uses schema `provider_intel.cli.v1` |
 | `--plain` | Emit plain-text output | Default |
 
@@ -70,9 +70,9 @@ Flags:
 | --- | --- | --- |
 | `--seeds` | Seed pack path | Active |
 | `--max` | Seed limit | Active |
-| `--crawl-mode` | `full` or `refresh` | Stored in checkpoint metadata; current pipeline does not branch on it |
+| `--crawl-mode` | `full` or `refresh` | `refresh` uses `monitorMaxPagesPerDomain`, `monitorMaxTotalPages`, and `monitorMaxDepth` to narrow fetch breadth while keeping the same stage order |
 | `--limit` | Export limit | Active, passed to export |
-| `--crawlee-headless` | `on` or `off` | Stored in sync options; current fetch layer still reads headless mode from config/env |
+| `--crawlee-headless` | `on` or `off` | Overrides the effective browser headless mode for that sync run |
 | `--run-id` | Explicit run id | Active |
 | `--resume` | Resume a checkpoint by id or `latest` | Active |
 | `--checkpoint-dir` | Alternate checkpoint directory | Active |
@@ -231,6 +231,12 @@ python3.11 provider_intel_cli.py doctor --json
 python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
 python3.11 provider_intel_cli.py status --json
 python3.11 provider_intel_cli.py search --json --preset review-queue
+```
+
+### Refresh-mode bounded run
+
+```bash
+python3.11 provider_intel_cli.py sync --json --crawl-mode refresh --max 10 --limit 25
 ```
 
 ### Resume after a failure

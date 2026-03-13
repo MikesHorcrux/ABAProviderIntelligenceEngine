@@ -126,6 +126,8 @@ What is outside the runtime:
 
 ## Notes On Accuracy And Current Gaps
 
-- `--crawl-mode` is accepted by `cli/app.py` and stored in run metadata by `cli/sync.py`, but the current stage runner does not branch on it.
-- `--crawlee-headless` is also stored in sync options, but the fetch layer still reads effective headless mode from config or env via `pipeline/config.py`.
+- The documented "agentic research loop" is an external agent/operator loop around the CLI, not a separate runtime stage.
+- `--crawl-mode refresh` changes fetch breadth by using `monitorMaxPagesPerDomain`, `monitorMaxTotalPages`, and `monitorMaxDepth`, but it keeps the same stage order and still performs a fresh-run table reset in `seed_ingest`.
+- `--crawlee-headless on|off` now overrides the effective browser headless setting for the current sync run.
+- `--db-timeout-ms` now sets SQLite connection timeout and `PRAGMA busy_timeout` for writable and read-only CLI connections.
 - `pipeline/quality.py` is legacy code from the prior product surface and is not part of the active provider-intel execution path.

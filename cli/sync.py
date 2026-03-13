@@ -25,8 +25,28 @@ from pipeline.run_state import (
 from pipeline.utils import utcnow_iso
 
 
-def _build_runner(run_id: str, *, db_path: str, seeds_path: str, args, runner_factory=PipelineRunner) -> PipelineRunner:
-    runner = runner_factory(seeds=seeds_path, db_path=db_path)
+def _runner_config_overrides(options: dict[str, Any]) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    headless = str(options.get("crawlee_headless") or "").strip().lower()
+    if headless in {"on", "off"}:
+        overrides["crawlee_headless"] = headless == "on"
+    return overrides
+
+
+def _runner_factory_kwargs(*, args, options: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "db_timeout_ms": getattr(args, "db_timeout_ms", None),
+        "config_overrides": _runner_config_overrides(options),
+        "crawl_mode": str(options.get("crawl_mode") or "full"),
+    }
+
+
+def _build_runner(run_id: str, *, db_path: str, seeds_path: str, args, options: dict[str, Any], runner_factory=PipelineRunner) -> PipelineRunner:
+    runner = runner_factory(
+        seeds=seeds_path,
+        db_path=db_path,
+        **_runner_factory_kwargs(args=args, options=options),
+    )
     runner.job_id = run_id
     return runner
 
@@ -67,7 +87,11 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
         db_path = str(state.get("db_path") or getattr(args, "db", DB_PATH))
     else:
         options = _sync_options_from_args(args)
-        bootstrap = runner_factory(seeds=getattr(args, "seeds", "seed_packs/nj/seed_pack.json"), db_path=getattr(args, "db", DB_PATH))
+        bootstrap = runner_factory(
+            seeds=getattr(args, "seeds", "seed_packs/nj/seed_pack.json"),
+            db_path=getattr(args, "db", DB_PATH),
+            **_runner_factory_kwargs(args=args, options=options),
+        )
         run_id = getattr(args, "run_id", None) or bootstrap.job_id
         seeds_path = bootstrap.seeds_path
         db_path = str(Path(getattr(args, "db", DB_PATH)).expanduser().resolve())
@@ -83,7 +107,14 @@ def execute_sync(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
         save_run_state(state, checkpoint_dir)
 
     ensure_run_control(run_id, checkpoint_dir)
-    runner = _build_runner(run_id, db_path=db_path, seeds_path=seeds_path, args=args, runner_factory=runner_factory)
+    runner = _build_runner(
+        run_id,
+        db_path=db_path,
+        seeds_path=seeds_path,
+        args=args,
+        options=options,
+        runner_factory=runner_factory,
+    )
     state["db_path"] = db_path
     state["seeds_path"] = seeds_path
     report = dict(state.get("report") or {})
@@ -205,10 +236,18 @@ def execute_tail(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
 
 
 def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
-    runner = runner_factory(db_path=getattr(args, "db", DB_PATH))
+    runner = runner_factory(
+        db_path=getattr(args, "db", DB_PATH),
+        db_timeout_ms=getattr(args, "db_timeout_ms", None),
+    )
     result = runner.run_export(limit=int(getattr(args, "limit", 100) or 100))
     return result
 
 
 def execute_init(args) -> dict[str, Any]:
-    return run_init(db_path=getattr(args, "db", DB_PATH), config_path=getattr(args, "config", None), run_state_dir=getattr(args, "checkpoint_dir", None))
+    return run_init(
+        db_path=getattr(args, "db", DB_PATH),
+        config_path=getattr(args, "config", None),
+        run_state_dir=getattr(args, "checkpoint_dir", None),
+        db_timeout_ms=getattr(args, "db_timeout_ms", None),
+    )

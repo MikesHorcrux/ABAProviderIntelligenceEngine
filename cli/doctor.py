@@ -11,7 +11,7 @@ from typing import Any
 from cli.errors import ConfigError
 from jobs.ingest_sources import assert_schema_layout, assert_schema_migration, init_db
 from pipeline.config import DEFAULT_CONFIG_PATH, CrawlConfig, load_crawl_config
-from pipeline.db import connect_db
+from pipeline.db import connect_db, normalized_db_timeout_ms, sqlite_timeout_seconds
 from pipeline.run_state import ensure_run_state_dir
 
 
@@ -24,7 +24,11 @@ MIN_FREE_BYTES = 128 * 1024 * 1024
 def resolve_config_path(cli_value: str | None) -> Path:
     if cli_value:
         return Path(cli_value).expanduser().resolve()
-    env_value = os.environ.get("PROVIDER_INTEL_CONFIG") or os.environ.get("CANNARADAR_CRAWLER_CONFIG")
+    env_value = (
+        os.environ.get("PROVIDER_INTEL_CONFIG")
+        or os.environ.get("PROVIDER_INTEL_CRAWLER_CONFIG")
+        or os.environ.get("CANNARADAR_CRAWLER_CONFIG")
+    )
     if env_value:
         return Path(env_value).expanduser().resolve()
     return DEFAULT_CONFIG_PATH.resolve()
@@ -40,8 +44,9 @@ def check_item(check_id: str, status: str, summary: str, *, details: dict[str, A
     }
 
 
-def run_doctor(*, db_path: str, config_path: str | None, run_state_dir: str | None) -> dict[str, Any]:
+def run_doctor(*, db_path: str, config_path: str | None, run_state_dir: str | None, db_timeout_ms: int | None = None) -> dict[str, Any]:
     resolved_config = resolve_config_path(config_path)
+    effective_timeout_ms = normalized_db_timeout_ms(db_timeout_ms)
     checks: list[dict[str, Any]] = []
     cfg: CrawlConfig | None = None
 
@@ -109,14 +114,18 @@ def run_doctor(*, db_path: str, config_path: str | None, run_state_dir: str | No
             checks.append(check_item(f"writable_{label}", "fail", f"Cannot write to {path}: {exc}", remediation="Fix permissions."))
 
     try:
-        con = connect_db(Path(db_path).expanduser().resolve())
+        con = connect_db(Path(db_path).expanduser().resolve(), timeout_ms=effective_timeout_ms)
         con.close()
         checks.append(check_item("db_connectivity", "pass", f"SQLite DB is reachable: {db_path}"))
     except Exception as exc:
         checks.append(check_item("db_connectivity", "fail", f"Failed to open SQLite DB: {exc}", remediation="Check the DB path and permissions."))
 
     try:
-        con = sqlite3.connect(Path(db_path).expanduser().resolve())
+        con = sqlite3.connect(
+            Path(db_path).expanduser().resolve(),
+            timeout=sqlite_timeout_seconds(effective_timeout_ms),
+        )
+        con.execute(f"PRAGMA busy_timeout = {effective_timeout_ms}")
         assert_schema_layout(con)
         assert_schema_migration(con)
         con.close()
@@ -222,9 +231,10 @@ def _config_requires_provider_rewrite(path: Path) -> bool:
     return not seed_file.endswith("seed_pack.json")
 
 
-def run_init(*, db_path: str, config_path: str | None, run_state_dir: str | None) -> dict[str, Any]:
+def run_init(*, db_path: str, config_path: str | None, run_state_dir: str | None, db_timeout_ms: int | None = None) -> dict[str, Any]:
     resolved_config = resolve_config_path(config_path)
     resolved_db = Path(db_path).expanduser().resolve()
+    effective_timeout_ms = normalized_db_timeout_ms(db_timeout_ms)
     resolved_db.parent.mkdir(parents=True, exist_ok=True)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -238,11 +248,17 @@ def run_init(*, db_path: str, config_path: str | None, run_state_dir: str | None
         resolved_policy.parent.mkdir(parents=True, exist_ok=True)
         resolved_policy.write_text(json.dumps(default_fetch_policies_payload(), indent=2), encoding="utf-8")
 
-    con = sqlite3.connect(resolved_db)
+    con = sqlite3.connect(resolved_db, timeout=sqlite_timeout_seconds(effective_timeout_ms))
+    con.execute(f"PRAGMA busy_timeout = {effective_timeout_ms}")
     init_db(con)
     con.close()
 
-    doctor = run_doctor(db_path=str(resolved_db), config_path=str(resolved_config), run_state_dir=run_state_dir)
+    doctor = run_doctor(
+        db_path=str(resolved_db),
+        config_path=str(resolved_config),
+        run_state_dir=run_state_dir,
+        db_timeout_ms=effective_timeout_ms,
+    )
     return {
         "ok": doctor["ok"],
         "db_path": str(resolved_db),

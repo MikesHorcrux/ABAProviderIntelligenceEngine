@@ -14,6 +14,16 @@ The pipeline is orchestrated by `cli/sync.py` and `pipeline/pipeline.py`. A sync
 6. `qa`
 7. `export`
 
+`sync --crawl-mode refresh` uses the monitor fetch budgets from
+`crawler_config.json` for the crawl stage:
+
+- `monitorMaxPagesPerDomain`
+- `monitorMaxTotalPages`
+- `monitorMaxDepth`
+
+It does not change the stage order, and on a fresh run it still rebuilds the
+active provider-intel tables during `seed_ingest`.
+
 ## Full Run Sequence
 
 ```mermaid
@@ -273,6 +283,7 @@ stateDiagram-v2
 
 ## Known Behavioral Nuances
 
-- `sync --crawl-mode refresh` currently records the mode in checkpoint metadata but does not alter stage execution.
-- `sync --crawlee-headless on|off` is accepted by the CLI and stored in run options, but effective headless behavior still comes from config or environment.
+- `sync --crawl-mode refresh` narrows fetch breadth only; it is not an incremental DB-preservation mode.
+- `sync --crawlee-headless on|off` overrides the effective browser headless mode for that sync run.
+- The documented agentic research loop is an external CLI operating loop for an agent, not a separate internal stage.
 - Export PDFs are currently fallback PDFs from Markdown, not Playwright-rendered layouts.

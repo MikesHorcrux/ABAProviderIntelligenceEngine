@@ -45,6 +45,15 @@ Success criteria:
 python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
 ```
 
+### Refresh-mode bounded run
+
+Use this when you want the full stage sequence with smaller crawl budgets from
+the `monitor*` settings in `crawler_config.json`.
+
+```bash
+python3.11 provider_intel_cli.py sync --json --crawl-mode refresh --max 10 --limit 25
+```
+
 ### Bounded live test
 
 ```bash

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from cli.errors import ConfigError, DataValidationError
+from pipeline.db import normalized_db_timeout_ms, sqlite_timeout_seconds
 from pipeline.run_control import load_run_control, summarize_run_control
 from pipeline.run_state import latest_run_state, load_run_state
 
@@ -64,11 +65,17 @@ PRESET_QUERIES = {
 }
 
 
-def _connect_readonly(db_path: str | Path) -> sqlite3.Connection:
+def _connect_readonly(db_path: str | Path, *, db_timeout_ms: int | None = None) -> sqlite3.Connection:
     path = Path(db_path).expanduser().resolve()
     if not path.exists():
         raise ConfigError(f"SQLite DB not found: {path}")
-    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    effective_timeout_ms = normalized_db_timeout_ms(db_timeout_ms)
+    con = sqlite3.connect(
+        f"file:{path}?mode=ro",
+        uri=True,
+        timeout=sqlite_timeout_seconds(effective_timeout_ms),
+    )
+    con.execute(f"PRAGMA busy_timeout = {effective_timeout_ms}")
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA query_only = ON")
     return con
@@ -96,7 +103,7 @@ def _file_snapshot(path: Path) -> dict[str, Any]:
     }
 
 
-def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -> dict[str, Any]:
+def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None, db_timeout_ms: int | None = None) -> dict[str, Any]:
     manifest = _read_json(MANIFEST_PATH) or {}
     checkpoint = None
     if run_id:
@@ -115,7 +122,7 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
         except FileNotFoundError:
             control_summary = {}
 
-    con = _connect_readonly(db_path)
+    con = _connect_readonly(db_path, db_timeout_ms=db_timeout_ms)
     counts = {
         "providers": int(con.execute("SELECT COUNT(*) FROM providers").fetchone()[0]),
         "practices": int(con.execute("SELECT COUNT(*) FROM practices").fetchone()[0]),
@@ -150,8 +157,8 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None) -
     }
 
 
-def run_search(*, db_path: str, query: str | None, preset: str | None, limit: int) -> dict[str, Any]:
-    con = _connect_readonly(db_path)
+def run_search(*, db_path: str, query: str | None, preset: str | None, limit: int, db_timeout_ms: int | None = None) -> dict[str, Any]:
+    con = _connect_readonly(db_path, db_timeout_ms=db_timeout_ms)
     try:
         if preset:
             sql = PRESET_QUERIES.get(preset)
@@ -183,7 +190,7 @@ def run_search(*, db_path: str, query: str | None, preset: str | None, limit: in
         con.close()
 
 
-def run_sql(*, db_path: str, query: str, limit: int) -> dict[str, Any]:
+def run_sql(*, db_path: str, query: str, limit: int, db_timeout_ms: int | None = None) -> dict[str, Any]:
     normalized = (query or "").strip()
     if not normalized:
         raise DataValidationError("SQL query is required.")
@@ -193,7 +200,7 @@ def run_sql(*, db_path: str, query: str, limit: int) -> dict[str, Any]:
     if any(term in lowered for term in FORBIDDEN_SQL_TERMS):
         raise DataValidationError("SQL command must be read-only.")
 
-    con = _connect_readonly(db_path)
+    con = _connect_readonly(db_path, db_timeout_ms=db_timeout_ms)
     try:
         rows = con.execute(f"SELECT * FROM ({normalized}) LIMIT ?", (limit,)).fetchall()
         data = [dict(row) for row in rows]

@@ -127,8 +127,12 @@ def _write_config(base: Path, *, port: int, browser_mode: bool = False) -> Path:
 
 
 def test_fetch_integration_local_server() -> None:
-    if os.environ.get("CANNARADAR_RUN_FETCH_INTEGRATION") != "1":
-        print("test_fetch_integration: skipped (set CANNARADAR_RUN_FETCH_INTEGRATION=1)")
+    run_fetch_integration = (
+        os.environ.get("PROVIDER_INTEL_RUN_FETCH_INTEGRATION")
+        or os.environ.get("CANNARADAR_RUN_FETCH_INTEGRATION")
+    )
+    if run_fetch_integration != "1":
+        print("test_fetch_integration: skipped (set PROVIDER_INTEL_RUN_FETCH_INTEGRATION=1)")
         return
 
     from pipeline.stages.fetch import run_fetch

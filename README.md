@@ -100,6 +100,8 @@ python3.11 provider_intel_cli.py export --json --limit 100
 If you want an AI agent to operate this repository end to end, give it the repo
 root, the seed scope, the run limits, and the output you expect. The agent
 should use the canonical CLI and keep the evidence-first safety rules intact.
+This loop is an external agent workflow around the CLI, not a separate internal
+pipeline stage.
 
 Minimum handoff:
 
@@ -127,6 +129,7 @@ python3.11 provider_intel_cli.py export --json --limit 100
 How the loop should be used:
 
 - Start bounded, not broad. Small runs make blocked domains, bad seeds, and noisy extraction easier to diagnose.
+- Use `--crawl-mode refresh` when you want the same stage order with smaller fetch budgets from the `monitor*` config settings.
 - Treat `review_queue` as a normal output lane, not a failure.
 - Use `control --run-id latest show` to inspect the current run before changing config or code.
 - Resume with `sync --resume latest` when a run was interrupted or when you want to continue from checkpoints.

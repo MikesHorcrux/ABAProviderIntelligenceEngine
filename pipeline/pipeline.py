@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from jobs.ingest_sources import load_reference_rules
 from pipeline.config import load_crawl_config
@@ -26,16 +27,59 @@ MANIFEST_PATH = ROOT / "data" / "state" / "last_run_manifest.json"
 
 
 class PipelineRunner:
-    def __init__(self, seeds: str | None = None, max_pages: int | None = None, db_path: str | Path = DB_PATH):
+    def __init__(
+        self,
+        seeds: str | None = None,
+        max_pages: int | None = None,
+        db_path: str | Path = DB_PATH,
+        *,
+        db_timeout_ms: int | None = None,
+        config_overrides: dict[str, Any] | None = None,
+        crawl_mode: str = "full",
+    ):
         self.db_path = Path(db_path)
         self.max_pages = max_pages
+        self.db_timeout_ms = int(db_timeout_ms) if db_timeout_ms is not None else None
         self.config = load_crawl_config()
+        self.crawl_mode = str(crawl_mode or "full").strip().lower()
+        self._apply_config_overrides(config_overrides or {})
         self.seeds_path = str(seeds or self.config.seed_file or "seed_packs/nj/seed_pack.json")
         self.job_id = utcnow_iso().replace(":", "").replace("-", "").replace("T", "-")
         self.logger = build_logger(self.job_id, "provider_intel")
         self.metrics = Metrics(self.job_id)
         self._seed_lookup_cache: dict[str, DiscoverySeed] = {}
         self._metro_lookup_cache: dict[str, str] = {}
+
+    def _apply_config_overrides(self, overrides: dict[str, Any]) -> None:
+        for key, value in overrides.items():
+            if value is None or not hasattr(self.config, key):
+                continue
+            setattr(self.config, key, value)
+
+    def _fetch_mode_overrides(self) -> dict[str, int | None]:
+        if self.crawl_mode != "refresh":
+            return {
+                "max_pages_per_domain": None,
+                "max_total_pages": None,
+                "max_depth": None,
+            }
+
+        max_pages_per_domain = max(
+            1,
+            int(self.config.monitor_max_pages_per_domain or self.config.max_pages_per_domain or 1),
+        )
+        max_total_pages = int(self.config.monitor_max_total_pages or max_pages_per_domain)
+        if max_total_pages <= 0:
+            max_total_pages = max_pages_per_domain
+        max_depth = max(
+            0,
+            int(self.config.monitor_max_depth if self.config.monitor_max_depth is not None else self.config.max_depth),
+        )
+        return {
+            "max_pages_per_domain": max_pages_per_domain,
+            "max_total_pages": max_total_pages,
+            "max_depth": max_depth,
+        }
 
     def _seed_pack_path(self) -> Path:
         candidate = Path(self.seeds_path)
@@ -64,7 +108,7 @@ class PipelineRunner:
         return DiscoverySeed(name=name, website=website, state=state, market=market, source="seed_pack")
 
     def _load_results_for_extraction(self, since: str | None = None) -> list[FetchResult]:
-        con = connect_db(self.db_path, SCHEMA_PATH)
+        con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
         query = """
             SELECT cj.crawl_job_pk, cj.seed_name, cj.seed_domain, cr.target_url, cr.status_code, cr.content,
                    cr.content_hash, cr.fetched_at
@@ -100,7 +144,7 @@ class PipelineRunner:
         return fetched
 
     def run_seed_ingest(self, seed_limit: int | None = None) -> dict[str, object]:
-        con = connect_db(self.db_path, SCHEMA_PATH)
+        con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
         for table in (
             "providers",
             "practices",
@@ -135,7 +179,11 @@ class PipelineRunner:
         run_state_dir: str | Path | None = None,
     ) -> list[FetchResult]:
         seeds = seeds or self._load_seeds()
-        con = connect_db(self.db_path, SCHEMA_PATH)
+        con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
+        mode_overrides = self._fetch_mode_overrides()
+        effective_max_pages = max_pages_per_domain if max_pages_per_domain is not None else mode_overrides["max_pages_per_domain"]
+        effective_max_total = max_total_pages if max_total_pages is not None else mode_overrides["max_total_pages"]
+        effective_max_depth = max_depth if max_depth is not None else mode_overrides["max_depth"]
         fetched = run_fetch(
             con=con,
             seeds=seeds,
@@ -143,9 +191,9 @@ class PipelineRunner:
             logger=self.logger,
             metrics=self.metrics,
             job_id=self.job_id,
-            max_pages_per_domain=max_pages_per_domain,
-            max_total_pages=max_total_pages,
-            max_depth=max_depth,
+            max_pages_per_domain=effective_max_pages,
+            max_total_pages=effective_max_total,
+            max_depth=effective_max_depth,
             run_state_dir=run_state_dir,
         )
         con.close()
@@ -153,7 +201,7 @@ class PipelineRunner:
 
     def run_extract(self, fetched: list[FetchResult] | None = None, since: str | None = None) -> int:
         fetched_rows = list(fetched or self._load_results_for_extraction(since))
-        con = connect_db(self.db_path, SCHEMA_PATH)
+        con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
         metro_lookup = self._load_metro_lookup()
         extracted_count = 0
         for item in fetched_rows:
@@ -231,7 +279,7 @@ class PipelineRunner:
         return extracted_count
 
     def run_resolve(self) -> dict[str, int]:
-        con = connect_db(self.db_path, SCHEMA_PATH)
+        con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
         result = resolve_extracted_records(con)
         con.close()
         return {
@@ -240,19 +288,19 @@ class PipelineRunner:
         }
 
     def run_score(self) -> int:
-        con = connect_db(self.db_path, SCHEMA_PATH)
+        con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
         updated = run_score(con)
         con.close()
         return updated
 
     def run_qa(self) -> dict[str, int]:
-        con = connect_db(self.db_path, SCHEMA_PATH)
+        con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
         result = run_qa(con)
         con.close()
         return result
 
     def run_export(self, limit: int = 100) -> dict[str, object]:
-        con = connect_db(self.db_path, SCHEMA_PATH)
+        con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
         result = export_provider_intel(con, OUT_DIR, self.job_id, limit=limit)
         con.close()
         return result

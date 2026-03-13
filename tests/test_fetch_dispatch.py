@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 from pathlib import Path
 
 from pipeline.config import load_crawl_config
+from pipeline.db import connect_db
 import pipeline.fetch_backends.crawlee_backend as crawlee_backend
+import pipeline.pipeline as pipeline_module
 from pipeline.fetch_backends.crawlee_backend import SeedCrawlState
 from pipeline.fetch_backends.common import (
     SeedRunRecorder,
@@ -17,6 +20,7 @@ from pipeline.fetch_backends.common import (
 )
 from pipeline.fetch_backends.domain_policy import load_domain_policies
 from pipeline.observability import Metrics, build_logger
+from pipeline.pipeline import PipelineRunner
 from pipeline.run_control import load_run_control
 from pipeline.stages.discovery import DiscoverySeed
 
@@ -267,6 +271,96 @@ def test_seed_run_recorder_commits_progress_immediately() -> None:
         con.close()
 
 
+def test_connect_db_applies_busy_timeout() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db_path = Path(td) / "busy-timeout.db"
+        con = connect_db(db_path, timeout_ms=4321)
+        timeout_value = int(con.execute("PRAGMA busy_timeout").fetchone()[0])
+        con.close()
+        assert timeout_value == 4321
+
+
+def test_pipeline_runner_refresh_mode_uses_monitor_fetch_limits() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        config_path = root / "crawler_config.json"
+        db_path = root / "provider_intel.db"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "seedFile": "seed_packs/nj/seed_pack.json",
+                    "monitorMaxPagesPerDomain": 4,
+                    "monitorMaxTotalPages": 3,
+                    "monitorMaxDepth": 1,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        previous = os.environ.get("PROVIDER_INTEL_CONFIG")
+        os.environ["PROVIDER_INTEL_CONFIG"] = str(config_path)
+        original_run_fetch = pipeline_module.run_fetch
+        captured: dict[str, object] = {}
+        try:
+            def fake_run_fetch(**kwargs):
+                captured.update(
+                    {
+                        "max_pages_per_domain": kwargs.get("max_pages_per_domain"),
+                        "max_total_pages": kwargs.get("max_total_pages"),
+                        "max_depth": kwargs.get("max_depth"),
+                    }
+                )
+                return []
+
+            pipeline_module.run_fetch = fake_run_fetch
+            runner = PipelineRunner(db_path=db_path, crawl_mode="refresh")
+            runner.run_fetch(
+                seeds=[DiscoverySeed(name="Demo", website="https://demo.example", state="NJ", market="Newark")],
+            )
+        finally:
+            pipeline_module.run_fetch = original_run_fetch
+            if previous is None:
+                os.environ.pop("PROVIDER_INTEL_CONFIG", None)
+            else:
+                os.environ["PROVIDER_INTEL_CONFIG"] = previous
+
+        assert captured == {
+            "max_pages_per_domain": 4,
+            "max_total_pages": 3,
+            "max_depth": 1,
+        }
+
+
+def test_pipeline_runner_applies_headless_override() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        config_path = root / "crawler_config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "seedFile": "seed_packs/nj/seed_pack.json",
+                    "crawleeHeadless": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        previous = os.environ.get("PROVIDER_INTEL_CONFIG")
+        os.environ["PROVIDER_INTEL_CONFIG"] = str(config_path)
+        try:
+            runner = PipelineRunner(
+                db_path=root / "provider_intel.db",
+                config_overrides={"crawlee_headless": False},
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("PROVIDER_INTEL_CONFIG", None)
+            else:
+                os.environ["PROVIDER_INTEL_CONFIG"] = previous
+
+        assert runner.config.crawlee_headless is False
+
+
 def test_seed_crawl_state_filters_assets_and_honors_manual_controls() -> None:
     con = _connect()
     metrics = Metrics("fetch-controls")
@@ -460,6 +554,9 @@ def main() -> None:
     test_seed_run_recorder_persists_contract_rows_and_results()
     test_seed_run_recorder_uses_status_hint_for_empty_blocked_seed()
     test_seed_run_recorder_commits_progress_immediately()
+    test_connect_db_applies_busy_timeout()
+    test_pipeline_runner_refresh_mode_uses_monitor_fetch_limits()
+    test_pipeline_runner_applies_headless_override()
     test_seed_crawl_state_filters_assets_and_honors_manual_controls()
     test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns()
     test_run_fetch_contains_browser_driver_failure_to_one_seed()

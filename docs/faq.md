@@ -36,11 +36,15 @@ Yes, that is the closest thing to a sales list in the current runtime. It still 
 
 ## Does `--crawl-mode refresh` change behavior today?
 
-Not yet. It is stored in run metadata, but the current sync path does not branch on it.
+Yes. It narrows the crawl stage by using `monitorMaxPagesPerDomain`,
+`monitorMaxTotalPages`, and `monitorMaxDepth` from `crawler_config.json`.
+It still runs the same stage order and still rebuilds the active provider-intel
+tables on a fresh run.
 
 ## Does `--crawlee-headless off` force visible browser crawling today?
 
-Not directly. The flag is parsed and stored, but current effective headless behavior still comes from config or environment.
+Yes for the current sync run. It overrides the effective browser headless mode
+without requiring you to rewrite `crawler_config.json`.
 
 ## How do I stop a noisy domain without editing code?
 
