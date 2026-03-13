@@ -14,14 +14,20 @@ from pipeline.fetch_backends.common import FetchResult
 
 class FakeRunner:
     should_fail_once = True
+    last_init: dict[str, object] = {}
 
-    def __init__(self, seeds=None, db_path=None):
+    def __init__(self, seeds=None, db_path=None, **kwargs):
         self.seeds_path = seeds or "seed_packs/nj/seed_pack.json"
         self.db_path = Path(db_path)
         self.job_id = "fake-job"
         self.config = SimpleNamespace(config_path=str(self.db_path.parent / "crawler_config.json"))
         self.metrics = SimpleNamespace(snapshot=lambda: {})
         self._seeds = [DiscoverySeed(name="NJ Seed", website="https://seed.example", state="NJ", market="Newark", tier="A", source_type="licensing_board", extraction_profile="board")]
+        FakeRunner.last_init = {
+            "seeds": self.seeds_path,
+            "db_path": str(self.db_path),
+            **kwargs,
+        }
 
     def _load_seeds(self, seed_limit=None):
         return self._seeds[: seed_limit or len(self._seeds)]
@@ -92,6 +98,7 @@ def test_run_state_round_trip() -> None:
 
 def test_execute_sync_can_resume_from_checkpoint() -> None:
     FakeRunner.should_fail_once = True
+    FakeRunner.last_init = {}
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         checkpoint_dir = root / "checkpoints"
@@ -101,11 +108,12 @@ def test_execute_sync_can_resume_from_checkpoint() -> None:
             max=1,
             crawl_mode="full",
             limit=100,
-            crawlee_headless=None,
+            crawlee_headless="off",
             run_id="resume-test",
             resume=None,
             checkpoint_dir=str(checkpoint_dir),
             config=None,
+            db_timeout_ms=12345,
         )
 
         try:
@@ -113,6 +121,10 @@ def test_execute_sync_can_resume_from_checkpoint() -> None:
             raise AssertionError("sync should have failed on the first extract attempt")
         except RuntimeError as exc:
             assert "synthetic extract failure" in str(exc)
+
+        assert FakeRunner.last_init["db_timeout_ms"] == 12345
+        assert FakeRunner.last_init["crawl_mode"] == "full"
+        assert FakeRunner.last_init["config_overrides"] == {"crawlee_headless": False}
 
         state = load_run_state("resume-test", checkpoint_dir)
         assert state["stages"]["extract"]["status"] == "failed"
@@ -124,6 +136,32 @@ def test_execute_sync_can_resume_from_checkpoint() -> None:
         assert resumed["status"] == "completed"
         assert resumed["stages"]["qa"]["status"] == "completed"
         assert resumed["stages"]["export"]["status"] == "completed"
+
+
+def test_execute_sync_passes_refresh_mode_to_runner() -> None:
+    FakeRunner.last_init = {}
+    FakeRunner.should_fail_once = False
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        checkpoint_dir = root / "checkpoints"
+        args = SimpleNamespace(
+            db=str(root / "provider_intel.db"),
+            seeds="seed_packs/nj/seed_pack.json",
+            max=1,
+            crawl_mode="refresh",
+            limit=25,
+            crawlee_headless=None,
+            run_id="refresh-test",
+            resume=None,
+            checkpoint_dir=str(checkpoint_dir),
+            config=None,
+            db_timeout_ms=5000,
+        )
+
+        execute_sync(args, runner_factory=FakeRunner)
+
+        assert FakeRunner.last_init["crawl_mode"] == "refresh"
+        assert FakeRunner.last_init["db_timeout_ms"] == 5000
 
 
 def test_finalize_run_control_clears_stale_running_domain() -> None:
@@ -153,6 +191,7 @@ def test_finalize_run_control_clears_stale_running_domain() -> None:
 def main() -> None:
     test_run_state_round_trip()
     test_execute_sync_can_resume_from_checkpoint()
+    test_execute_sync_passes_refresh_mode_to_runner()
     test_finalize_run_control_clears_stale_running_domain()
     print("test_run_state: ok")
 

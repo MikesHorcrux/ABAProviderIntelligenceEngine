@@ -39,7 +39,7 @@ The current suite is mostly contract and fixture driven. It proves the core pipe
 
 Important nuance:
 
-- `tests/test_fetch_integration.py` is opt-in and only runs when `CANNARADAR_RUN_FETCH_INTEGRATION=1`.
+- `tests/test_fetch_integration.py` is opt-in and only runs when `PROVIDER_INTEL_RUN_FETCH_INTEGRATION=1`.
 - `pipeline/quality.py` is not part of the active provider-intel pipeline and is not a release gate.
 
 ## Recommended Test Commands
@@ -59,7 +59,7 @@ PYTHONPATH=$PWD python3.11 tests/test_lead_research.py
 Optional local integration:
 
 ```bash
-CANNARADAR_RUN_FETCH_INTEGRATION=1 PYTHONPATH=$PWD python3.11 tests/test_fetch_integration.py
+PROVIDER_INTEL_RUN_FETCH_INTEGRATION=1 PYTHONPATH=$PWD python3.11 tests/test_fetch_integration.py
 ```
 
 CLI sanity checks:
