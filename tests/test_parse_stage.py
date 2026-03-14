@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pipeline.fetch_backends.common import FetchResult
 from pipeline.stages.discovery import DiscoverySeed
-from pipeline.stages.extract import extract_records
+from pipeline.stages.extract import _classify_page, _provider_candidates, extract_records
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "provider_intel"
@@ -160,6 +160,76 @@ def test_extract_records_builds_hospital_practice_signal_without_named_provider(
     assert "child" in row.age_groups
 
 
+def test_page_classification_marks_publication_pages_as_non_extractable() -> None:
+    html = """
+        <html>
+        <head><title>Publications | Graduate School of Applied and Professional Psychology</title></head>
+        <body>
+        <h1>Publications</h1>
+        <p>Lesia Ruglass, PhD authored a paper on trauma treatment.</p>
+        </body>
+        </html>
+    """
+    seed = DiscoverySeed(
+        name="Rutgers Center for Adult Autism Services",
+        website="https://gsapp.rutgers.edu/centers-clinics/rutgers-center-adult-autism-services-rcaas",
+        state="NJ",
+        market="Newark",
+        tier="B",
+        source_type="university_directory",
+        extraction_profile="hospital",
+    )
+    provider_matches = _provider_candidates("Lesia Ruglass, PhD authored a paper on trauma treatment.", seed)
+    classified = _classify_page(
+        seed=seed,
+        page_title="Publications | Graduate School of Applied and Professional Psychology",
+        source_url="https://gsapp.rutgers.edu/publications",
+        text="Lesia Ruglass, PhD authored a paper on trauma treatment.",
+        provider_matches=provider_matches,
+    )
+    assert classified.role == "publication_news"
+    assert classified.allow_provider_extraction is False
+    assert classified.allow_practice_extraction is False
+
+
+
+def test_extract_records_skips_publication_pages_before_provider_extraction() -> None:
+    fetch = FetchResult(
+        job_pk="job_publication",
+        seed_name="Rutgers Center for Adult Autism Services",
+        seed_state="NJ",
+        seed_market="Newark",
+        seed_website="https://gsapp.rutgers.edu/centers-clinics/rutgers-center-adult-autism-services-rcaas",
+        target_url="https://gsapp.rutgers.edu/publications",
+        normalized_url="https://gsapp.rutgers.edu/publications",
+        status_code=200,
+        content="""
+            <html>
+            <head><title>Publications | Graduate School of Applied and Professional Psychology</title></head>
+            <body>
+            <h1>Publications</h1>
+            <p>Lesia Ruglass, PhD authored a paper on trauma treatment.</p>
+            <p>Steven Sohnle, PhD discussed interventions in a webinar.</p>
+            </body>
+            </html>
+        """,
+        content_hash="hash_publication",
+        fetched_at="2026-03-09T00:00:00Z",
+    )
+    seed = DiscoverySeed(
+        name="Rutgers Center for Adult Autism Services",
+        website="https://gsapp.rutgers.edu/centers-clinics/rutgers-center-adult-autism-services-rcaas",
+        state="NJ",
+        market="Newark",
+        tier="B",
+        source_type="university_directory",
+        extraction_profile="hospital",
+    )
+    extracted = extract_records(fetch, seed, {})
+    assert extracted == []
+
+
+
 def test_extract_records_extracts_university_clinicians_conservatively() -> None:
     fetch = FetchResult(
         job_pk="job_university",
@@ -197,6 +267,8 @@ def main() -> None:
     test_extract_records_skips_blocked_board_page()
     test_extract_records_extracts_board_license_detail_for_enrichment()
     test_extract_records_builds_hospital_practice_signal_without_named_provider()
+    test_page_classification_marks_publication_pages_as_non_extractable()
+    test_extract_records_skips_publication_pages_before_provider_extraction()
     test_extract_records_extracts_university_clinicians_conservatively()
     print("test_parse_stage: ok")
 

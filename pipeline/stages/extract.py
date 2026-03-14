@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from pipeline.fetch_backends.common import FetchResult, detect_block_signal
 from pipeline.stages.discovery import DiscoverySeed
@@ -46,6 +47,13 @@ TELEHEALTH_RE = re.compile(r"\b(telehealth|virtual visits?|video visits?|remote 
 CHILD_RE = re.compile(r"\b(children|child|pediatric|adolescent|teen)\b", re.I)
 ADULT_RE = re.compile(r"\b(adult|adults)\b", re.I)
 PAGE_RELEVANCE_RE = re.compile(r"\b(autism|asd|adhd|developmental|diagnostic|evaluation|assessment|neurodevelopment)\b", re.I)
+PROVIDER_PAGE_RE = re.compile(r"\b(provider|providers|staff|team|doctor|doctors|physician|psychologist|psychiatrist|clinician|faculty)\b", re.I)
+PRACTICE_SERVICE_PAGE_RE = re.compile(r"\b(evaluation|evaluations|assessment|assessments|clinic|clinics|services|service|treatment|diagnostic|diagnostics|autism|adhd)\b", re.I)
+FAQ_PAGE_RE = re.compile(r"\b(faq|frequently asked questions|before your assessment|approach to treatment|what can i expect)\b", re.I)
+PUBLICATION_PAGE_RE = re.compile(r"\b(publications|publication|journal|webinar|webinars|continuing education|news|blog|article|articles|event|events)\b", re.I)
+DIRECTORY_PAGE_RE = re.compile(r"\b(find a therapist|find child therapists|directory|results|browse therapists|therapists near)\b", re.I)
+ADMIN_NOISE_PAGE_RE = re.compile(r"\b(careers|jobs|donate|foundation|press room|privacy policy|terms of use)\b", re.I)
+DIRECTORY_DETAIL_HINT_RE = re.compile(r"\b(profile|bio|provider|staff|team|doctor|therapist|psychologist|psychiatrist)\b", re.I)
 ASD_EXPLICIT_PATTERNS = (
     re.compile(
         r"\b(?:autism|asd|autism spectrum disorder).{0,80}\b(?:diagnostic evaluations?|diagnostic testing|assessment(?:s)?|testing(?: services?)?|evaluations?)\b",
@@ -131,6 +139,13 @@ class ProviderCandidate:
     credentials: str
     start: int
     end: int
+
+
+@dataclass(frozen=True)
+class PageClassification:
+    role: str
+    allow_provider_extraction: bool
+    allow_practice_extraction: bool
 
 
 def _match_evidence(pattern: re.Pattern[str], text: str, field: str, value: str, source_url: str) -> EvidenceItem | None:
@@ -375,6 +390,37 @@ def _board_license_type(seed: DiscoverySeed, text: str) -> str:
     return "unknown"
 
 
+def _classify_page(
+    *,
+    seed: DiscoverySeed,
+    page_title: str,
+    source_url: str,
+    text: str,
+    provider_matches: list[ProviderCandidate],
+) -> PageClassification:
+    if seed.source_type == "licensing_board":
+        return PageClassification(role="board", allow_provider_extraction=True, allow_practice_extraction=True)
+
+    parsed = urlparse(source_url or "")
+    path = (parsed.path or "").lower()
+    haystack = normalize_text(f"{page_title} {source_url} {text[:1200]}")
+
+    if ADMIN_NOISE_PAGE_RE.search(haystack):
+        return PageClassification(role="admin_noise", allow_provider_extraction=False, allow_practice_extraction=False)
+    if PUBLICATION_PAGE_RE.search(haystack):
+        return PageClassification(role="publication_news", allow_provider_extraction=False, allow_practice_extraction=False)
+    if FAQ_PAGE_RE.search(haystack):
+        return PageClassification(role="faq_help", allow_provider_extraction=False, allow_practice_extraction=True)
+    if DIRECTORY_PAGE_RE.search(haystack):
+        allow_provider = bool(provider_matches) and bool(DIRECTORY_DETAIL_HINT_RE.search(path))
+        return PageClassification(role="directory_listing", allow_provider_extraction=allow_provider, allow_practice_extraction=False)
+    if PROVIDER_PAGE_RE.search(haystack) and provider_matches:
+        return PageClassification(role="provider_page", allow_provider_extraction=True, allow_practice_extraction=True)
+    if PRACTICE_SERVICE_PAGE_RE.search(haystack):
+        return PageClassification(role="practice_service", allow_provider_extraction=True, allow_practice_extraction=True)
+    return PageClassification(role="unknown", allow_provider_extraction=bool(provider_matches), allow_practice_extraction=True)
+
+
 def _is_relevant_page(
     *,
     seed: DiscoverySeed,
@@ -382,9 +428,12 @@ def _is_relevant_page(
     source_url: str,
     asd_value: str,
     adhd_value: str,
+    page_classification: PageClassification,
 ) -> bool:
     if seed.source_type == "licensing_board":
         return True
+    if not page_classification.allow_provider_extraction and not page_classification.allow_practice_extraction:
+        return False
     if asd_value == "yes" or adhd_value == "yes":
         return True
     haystack = f"{page_title} {source_url}"
@@ -443,19 +492,30 @@ def extract_records(
         explicit_patterns=ADHD_EXPLICIT_PATTERNS,
         ambiguous_pattern=ADHD_AMBIGUOUS_RE,
     )
+    provider_matches = _provider_candidates(text, seed)
+    page_classification = _classify_page(
+        seed=seed,
+        page_title=page_title,
+        source_url=item.target_url,
+        text=text,
+        provider_matches=provider_matches,
+    )
     if not _is_relevant_page(
         seed=seed,
         page_title=page_title,
         source_url=item.target_url,
         asd_value=asd_value,
         adhd_value=adhd_value,
+        page_classification=page_classification,
     ):
         return []
 
-    provider_matches = _provider_candidates(text, seed)
+    if not page_classification.allow_provider_extraction:
+        provider_matches = []
+
     if not provider_matches:
         evidence: list[EvidenceItem] = []
-        reviewable_practice_signal = False
+        reviewable_practice_signal = page_classification.allow_practice_extraction
         if asd_evidence:
             evidence.append(asd_evidence)
             reviewable_practice_signal = reviewable_practice_signal or asd_evidence.value == "yes"
