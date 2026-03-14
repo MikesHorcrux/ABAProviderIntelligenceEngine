@@ -285,5 +285,5 @@ stateDiagram-v2
 
 - `sync --crawl-mode refresh` narrows fetch breadth only; it is not an incremental DB-preservation mode.
 - `sync --crawlee-headless on|off` overrides the effective browser headless mode for that sync run.
-- The documented agentic research loop is an external CLI operating loop for an agent, not a separate internal stage.
+- The tenant-scoped agent control plane now orchestrates the same deterministic runtime; it does not add a separate truth-writing stage.
 - Export PDFs are currently fallback PDFs from Markdown, not Playwright-rendered layouts.

@@ -12,6 +12,8 @@ The active runtime uses several versioned schemas and contracts:
   The checkpoint file schema in `pipeline/run_state.py`
 - `provider_intel.cli.v1`
   The JSON CLI envelope in `cli/output.py`
+- `agent_memory_v1`
+  The per-tenant agent session and memory schema in `agent_runtime/memory.py`
 - `seed_pack.v1`
   The source manifest contract used by `pipeline/stages/discovery.py`
 - `prescriber_rules.v1`
@@ -149,6 +151,29 @@ These are not stored in SQLite:
   Domain controls, runtime counters, and interventions
 - `data/state/last_run_manifest.json`
   Last export summary written by `pipeline/pipeline.py`
+
+When `--tenant` is used, these move under `storage/tenants/<tenant_id>/state/`.
+
+## Agent Memory Store
+
+The agent control plane keeps its own per-tenant SQLite file separate from the deterministic runtime DB:
+
+- `storage/tenants/<tenant_id>/memory/agent_memory_v1.db`
+
+Key tables in `agent_runtime/memory.py`:
+
+- `agent_sessions`
+  Stored session goal, status, last run id, and synthesized summaries
+- `agent_turns`
+  User and agent turns across `SupervisorAgent`, `RunOpsAgent`, `ReviewAgent`, and `ClientBriefAgent`
+- `agent_tool_events`
+  Tool traces with tenant id, session id, timestamps, reason, inputs, outputs, and status
+- `run_memory`
+  Run summaries and export reports keyed by `run_id`
+- `domain_tactics`
+  Per-domain tactics with decay windows and last-confirmed metadata
+- `client_profiles`
+  Tenant-owned client/account preferences used by the agent layer
 
 ## Migration And Versioning Notes
 

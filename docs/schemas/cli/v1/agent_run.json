@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://provider-intel.local/schemas/cli/v1/agent_run.json",
+  "title": "Provider Intel agent run output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "provider_intel.cli.v1" },
+    "command": { "const": "agent" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": [
+        "tenant_id",
+        "session_id",
+        "goal",
+        "tools_used",
+        "run_ids",
+        "exports",
+        "unresolved_risks",
+        "recommended_next_actions",
+        "memory_updates"
+      ],
+      "properties": {
+        "tenant_id": { "type": ["string", "null"] },
+        "session_id": { "type": "string" },
+        "goal": { "type": "string" },
+        "tools_used": { "type": "array", "items": { "type": "string" } },
+        "run_ids": { "type": "array", "items": { "type": "string" } },
+        "exports": { "type": "array", "items": { "type": "object" } },
+        "unresolved_risks": { "type": "array", "items": { "type": "string" } },
+        "recommended_next_actions": { "type": "array", "items": { "type": "string" } },
+        "memory_updates": { "type": "object" },
+        "summaries": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

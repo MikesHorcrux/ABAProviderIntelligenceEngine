@@ -11,6 +11,8 @@ The canonical CLI entrypoint is `provider_intel_cli.py`. The retired `cannaradar
 | `--db` | Alternate SQLite path | Defaults to `data/provider_intel_v1.db` |
 | `--db-timeout-ms` | SQLite timeout in milliseconds | Applied to writable and read-only CLI DB connections, and mirrored to `PRAGMA busy_timeout` |
 | `--config` | Alternate `crawler_config.json` | Also sets `PROVIDER_INTEL_CONFIG`, `PROVIDER_INTEL_CRAWLER_CONFIG`, and the legacy compatibility alias `CANNARADAR_CRAWLER_CONFIG` for the process |
+| `--tenant` | Tenant id for an isolated runtime root | When set, default DB/config/checkpoint/output paths move under `storage/tenants/<tenant_id>/` unless explicitly overridden |
+| `--tenant-root-base` | Override the base directory for tenant runtime roots | Used only when `--tenant` is set |
 | `--json` | Emit strict JSON envelope | Uses schema `provider_intel.cli.v1` |
 | `--plain` | Emit plain-text output | Default |
 
@@ -92,7 +94,7 @@ Additional flags:
 
 ### `status`
 
-Summarize current DB counts, last manifest, checkpoint state, run control state, and output snapshots.
+Summarize current DB counts, last manifest, checkpoint state, run control state, output snapshots, DB metadata, and recent failures.
 
 ```bash
 python3.11 provider_intel_cli.py status --json
@@ -189,6 +191,36 @@ python3.11 provider_intel_cli.py export --json --limit 100
 Flags:
 
 - `--limit`
+
+### `agent`
+
+Run the tenant-scoped provider agent control plane. `agent` commands require `--tenant`.
+
+Run a session:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Find NJ providers worth outbound this week"
+python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Resume the last bounded refresh loop" --session-id sess_123 --model gpt-5
+```
+
+Inspect a stored session:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme agent status
+python3.11 provider_intel_cli.py --json --tenant acme agent status --session-id sess_123
+```
+
+Resume a stored session:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme agent resume --session-id sess_123
+```
+
+Agent runtime notes:
+
+- Each tenant gets its own config, DB, checkpoints, outputs, and agent memory store.
+- The deterministic pipeline remains the source of truth; the agent orchestrates tools around it.
+- The first model adapter targets the OpenAI Responses API, but the internal model/tool contract is provider-neutral.
 
 ## JSON Envelope
 

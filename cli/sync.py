@@ -38,6 +38,7 @@ def _runner_factory_kwargs(*, args, options: dict[str, Any]) -> dict[str, Any]:
         "db_timeout_ms": getattr(args, "db_timeout_ms", None),
         "config_overrides": _runner_config_overrides(options),
         "crawl_mode": str(options.get("crawl_mode") or "full"),
+        "runtime_paths": getattr(args, "runtime_paths", None),
     }
 
 
@@ -239,6 +240,7 @@ def execute_export(args, *, runner_factory=PipelineRunner) -> dict[str, Any]:
     runner = runner_factory(
         db_path=getattr(args, "db", DB_PATH),
         db_timeout_ms=getattr(args, "db_timeout_ms", None),
+        runtime_paths=getattr(args, "runtime_paths", None),
     )
     result = runner.run_export(limit=int(getattr(args, "limit", 100) or 100))
     return result
@@ -250,4 +252,5 @@ def execute_init(args) -> dict[str, Any]:
         config_path=getattr(args, "config", None),
         run_state_dir=getattr(args, "checkpoint_dir", None),
         db_timeout_ms=getattr(args, "db_timeout_ms", None),
+        runtime_paths=getattr(args, "runtime_paths", None),
     )

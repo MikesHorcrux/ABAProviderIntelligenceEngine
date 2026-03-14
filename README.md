@@ -99,9 +99,10 @@ python3.11 provider_intel_cli.py export --json --limit 100
 
 If you want an AI agent to operate this repository end to end, give it the repo
 root, the seed scope, the run limits, and the output you expect. The agent
-should use the canonical CLI and keep the evidence-first safety rules intact.
-This loop is an external agent workflow around the CLI, not a separate internal
-pipeline stage.
+should use the canonical CLI or the tenant-scoped `agent` command surface and
+keep the evidence-first safety rules intact. The agent layer orchestrates the
+existing deterministic runtime; it is not a separate truth-writing pipeline
+stage.
 
 Minimum handoff:
 

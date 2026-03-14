@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+from cli.agent import execute_agent_resume, execute_agent_run, execute_agent_status
 from cli.control import run_control_apply, run_control_show
 from cli.doctor import run_doctor
 from cli.errors import ExitCode, UsageError, classify_exception
@@ -12,6 +13,7 @@ from cli.output import emit_payload, error_payload, success_payload
 from cli.query import run_search, run_sql, run_status
 from cli.sync import execute_export, execute_init, execute_sync, execute_tail
 from pipeline.pipeline import PipelineRunner
+from runtime_context import RuntimePaths, default_runtime_paths, resolve_runtime_paths
 
 
 def _require_python_311() -> None:
@@ -37,9 +39,11 @@ def _add_sync_args(parser: argparse.ArgumentParser) -> None:
 
 def make_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(description="Provider Intelligence agent-operable CLI")
-    parser.add_argument("--db", default=str(Path(__file__).resolve().parents[1] / "data" / "provider_intel_v1.db"))
+    parser.add_argument("--db", default=str(default_runtime_paths().db_path))
     parser.add_argument("--db-timeout-ms", type=int, default=30000)
     parser.add_argument("--config", default=None, help="Alternate crawler_config.json path.")
+    parser.add_argument("--tenant", default=None, help="Tenant id for an isolated runtime root.")
+    parser.add_argument("--tenant-root-base", default=None, help="Override the base directory for tenant runtime roots.")
     fmt = parser.add_mutually_exclusive_group()
     fmt.add_argument("--json", action="store_true", help="Emit strict machine-readable JSON.")
     fmt.add_argument("--plain", action="store_true", help="Emit line-oriented plain text output.")
@@ -104,6 +108,21 @@ def make_parser() -> argparse.ArgumentParser:
 
     export = sub.add_parser("export", help="Export provider records, profiles, PDFs, evidence bundles, and review queue outputs.")
     export.add_argument("--limit", type=int, default=100)
+
+    agent = sub.add_parser("agent", help="Run the tenant-scoped provider intelligence agent control plane.")
+    agent_sub = agent.add_subparsers(dest="agent_action", required=True)
+
+    agent_run = agent_sub.add_parser("run", help="Run an agent session against a tenant runtime.")
+    agent_run.add_argument("--goal", required=True)
+    agent_run.add_argument("--session-id", default=None)
+    agent_run.add_argument("--model", default=None)
+
+    agent_status = agent_sub.add_parser("status", help="Show stored status for a tenant agent session.")
+    agent_status.add_argument("--session-id", default=None)
+
+    agent_resume = agent_sub.add_parser("resume", help="Resume a stored tenant agent session.")
+    agent_resume.add_argument("--session-id", required=True)
+    agent_resume.add_argument("--model", default=None)
     return parser
 
 
@@ -130,6 +149,7 @@ def _dispatch(args) -> dict[str, object]:
             config_path=args.config,
             run_state_dir=args.checkpoint_dir,
             db_timeout_ms=args.db_timeout_ms,
+            runtime_paths=getattr(args, "runtime_paths", None),
         )
     if args.command == "sync":
         return execute_sync(args)
@@ -141,6 +161,7 @@ def _dispatch(args) -> dict[str, object]:
             run_id=args.run_id,
             run_state_dir=args.checkpoint_dir,
             db_timeout_ms=args.db_timeout_ms,
+            runtime_paths=getattr(args, "runtime_paths", None),
         )
     if args.command == "control":
         if args.control_action == "show":
@@ -168,7 +189,38 @@ def _dispatch(args) -> dict[str, object]:
         )
     if args.command == "export":
         return execute_export(args)
+    if args.command == "agent":
+        if args.agent_action == "run":
+            return execute_agent_run(args)
+        if args.agent_action == "status":
+            return execute_agent_status(args)
+        if args.agent_action == "resume":
+            return execute_agent_resume(args)
+        raise RuntimeError(f"Unsupported agent action: {args.agent_action}")
     raise RuntimeError(f"Unsupported command: {args.command}")
+
+
+def _resolve_runtime_paths_for_args(args) -> RuntimePaths:
+    legacy = default_runtime_paths()
+    db_value = str(getattr(args, "db", legacy.db_path))
+    db_override = None if db_value == str(legacy.db_path) else db_value
+    config_override = getattr(args, "config", None)
+    checkpoint_override = getattr(args, "checkpoint_dir", None)
+    runtime_paths = resolve_runtime_paths(
+        tenant_id=getattr(args, "tenant", None),
+        tenant_root_base=getattr(args, "tenant_root_base", None),
+        db_path=db_override,
+        config_path=config_override,
+        checkpoint_dir=checkpoint_override,
+    )
+    if hasattr(args, "db") and db_override is None and getattr(args, "tenant", None):
+        args.db = str(runtime_paths.db_path)
+    if hasattr(args, "config") and config_override is None and getattr(args, "tenant", None):
+        args.config = str(runtime_paths.config_path)
+    if hasattr(args, "checkpoint_dir") and checkpoint_override is None and getattr(args, "tenant", None):
+        args.checkpoint_dir = str(runtime_paths.checkpoint_dir)
+    args.runtime_paths = runtime_paths
+    return runtime_paths
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -181,11 +233,18 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
         args.json = output_format == "json"
         args.plain = output_format == "plain"
+        runtime_paths = _resolve_runtime_paths_for_args(args)
+        if args.command == "agent" and not getattr(args, "tenant", None):
+            raise UsageError("`agent` commands require --tenant.")
         if args.config:
             resolved = str(Path(args.config).expanduser().resolve())
             os.environ["PROVIDER_INTEL_CONFIG"] = resolved
             os.environ["PROVIDER_INTEL_CRAWLER_CONFIG"] = resolved
             os.environ["CANNARADAR_CRAWLER_CONFIG"] = resolved
+        if getattr(args, "tenant", None):
+            os.environ["PROVIDER_INTEL_TENANT_ID"] = str(args.tenant)
+        os.environ["PROVIDER_INTEL_OUT_ROOT"] = str(runtime_paths.out_root)
+        os.environ["PROVIDER_INTEL_STATE_DIR"] = str(runtime_paths.state_dir)
         command = args.command
         data = _dispatch(args)
         payload = success_payload(command, data=data, message=f"{command} completed")
