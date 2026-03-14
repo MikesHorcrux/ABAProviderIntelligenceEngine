@@ -7,7 +7,7 @@ import os
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -549,6 +549,13 @@ class SeedCrawlState:
         seed_url = self.queue_url(self.seed.website, 0)
         if seed_url is not None:
             items.append(seed_url)
+
+        parsed_seed = urlparse(self.seed.website)
+        seed_path = (parsed_seed.path or "/").strip() or "/"
+        should_seed_extra_paths = not self.seed.browser_required and seed_path in {"", "/"}
+        if not should_seed_extra_paths:
+            return items
+
         for path in self.cfg.extra_paths:
             candidate = normalize_url(f"{self.seed.website.rstrip('/')}{path}")
             item = self.queue_url(candidate, 0)
@@ -1286,6 +1293,8 @@ def run_fetch(
             continue
 
         policy = policy_set.resolve(seed.website)
+        if seed.browser_required and policy.mode == "http_then_browser_on_block":
+            policy = replace(policy, mode="browser")
         crawl_pages = _effective_crawl_pages(cfg, policy, max_pages_per_domain)
         total_limit = _effective_total_pages(cfg, max_total_pages, crawl_pages)
         crawl_depth_limit = _effective_crawl_depth(cfg, policy, max_depth)

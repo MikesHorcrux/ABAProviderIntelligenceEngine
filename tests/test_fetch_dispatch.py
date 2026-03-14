@@ -411,6 +411,150 @@ def test_seed_crawl_state_filters_assets_and_honors_manual_controls() -> None:
     con.close()
 
 
+def test_seed_initial_requests_skip_synthetic_paths_for_nested_or_browser_required_seeds() -> None:
+    con = _connect()
+    metrics = Metrics("fetch-initial-requests")
+    logger = build_logger("fetch-initial-requests", "fetch")
+    cfg = load_crawl_config("/tmp/provider-intel-fetch-initial-does-not-exist.json")
+
+    with tempfile.TemporaryDirectory() as td:
+        policy = load_domain_policies("/tmp/does-not-exist-fetch-policy.json").default
+
+        nested_seed = DiscoverySeed(
+            name="Nested Seed",
+            website="https://example.com/directory/listing",
+            state="CA",
+            market="CA",
+        )
+        nested_recorder = SeedRunRecorder(
+            con=con,
+            seed=nested_seed,
+            seed_domain="example.com",
+            job_id="job-initial-nested",
+            metrics=metrics,
+        )
+        nested_recorder.start()
+        nested_state = SeedCrawlState(
+            con=con,
+            seed=nested_seed,
+            cfg=cfg,
+            policy=policy,
+            metrics=metrics,
+            logger=logger,
+            job_id="job-initial-nested",
+            denylist=set(),
+            recorder=nested_recorder,
+            crawl_pages=10,
+            total_page_limit=10,
+            crawl_depth=2,
+            browser_page_limit=3,
+            run_state_dir=td,
+        )
+        nested_requests = nested_state.seed_initial_requests()
+        assert [item.normalized_url for item in nested_requests] == ["https://example.com/directory/listing"]
+
+        browser_seed = DiscoverySeed(
+            name="Browser Seed",
+            website="https://example.com",
+            state="CA",
+            market="CA",
+            browser_required=True,
+        )
+        browser_recorder = SeedRunRecorder(
+            con=con,
+            seed=browser_seed,
+            seed_domain="example.com",
+            job_id="job-initial-browser",
+            metrics=metrics,
+        )
+        browser_recorder.start()
+        browser_state = SeedCrawlState(
+            con=con,
+            seed=browser_seed,
+            cfg=cfg,
+            policy=policy,
+            metrics=metrics,
+            logger=logger,
+            job_id="job-initial-browser",
+            denylist=set(),
+            recorder=browser_recorder,
+            crawl_pages=10,
+            total_page_limit=10,
+            crawl_depth=2,
+            browser_page_limit=3,
+            run_state_dir=td,
+        )
+        browser_requests = browser_state.seed_initial_requests()
+        assert [item.normalized_url for item in browser_requests] == ["https://example.com"]
+
+    con.close()
+
+
+def test_browser_required_seed_runs_in_browser_mode_without_http_stage() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db_path = Path(td) / "fetch.db"
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        metrics = Metrics("fetch-browser-required")
+        logger = build_logger("fetch-browser-required", "fetch")
+        cfg = load_crawl_config("/tmp/provider-intel-fetch-browser-required.json")
+        seed = DiscoverySeed(
+            name="Browser Required",
+            website="https://browser-required.example",
+            state="CA",
+            market="CA",
+            browser_required=True,
+        )
+
+        original_http = crawlee_backend._run_http_crawl
+        original_browser_dispatch = crawlee_backend._run_browser_crawl_dispatch
+        calls: list[str] = []
+
+        async def fake_run_http_crawl(state, initial_requests):
+            calls.append(f"http:{state.domain}")
+
+        def fake_run_browser_dispatch(state, initial_requests):
+            calls.append(f"browser:{state.domain}")
+            target_url = initial_requests[0].normalized_url
+            state.mark_processed(target_url)
+            state.recorder.record_result(
+                requested_url=target_url,
+                normalized_url=target_url,
+                status_code=200,
+                content="<html>ok</html>",
+                error_message="",
+                attempt_count=1,
+                emit_result=True,
+                count_as_success=True,
+                used_browser=True,
+            )
+            state.observe_success()
+
+        crawlee_backend._run_http_crawl = fake_run_http_crawl
+        crawlee_backend._run_browser_crawl_dispatch = fake_run_browser_dispatch
+        try:
+            results = crawlee_backend.run_fetch(
+                con,
+                [seed],
+                cfg,
+                logger,
+                metrics,
+                "job-browser-required",
+                max_pages_per_domain=2,
+                max_total_pages=2,
+                max_depth=0,
+                run_state_dir=td,
+            )
+        finally:
+            crawlee_backend._run_http_crawl = original_http
+            crawlee_backend._run_browser_crawl_dispatch = original_browser_dispatch
+
+        assert calls == ["browser:browser-required.example"]
+        assert any(result.normalized_url == "https://browser-required.example" for result in results)
+        con.close()
+
+
 def test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns() -> None:
     con = _connect()
     metrics = Metrics("fetch-healing")
