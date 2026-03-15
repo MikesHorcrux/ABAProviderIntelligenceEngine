@@ -2,7 +2,7 @@
 
 Last verified against commit `0c5e92b`.
 
-This repository is an evidence-first provider intelligence runtime for New Jersey ASD/ADHD provider discovery, verification, and export.
+This repository is an evidence-first provider intelligence runtime for New Jersey ASD/ADHD provider discovery, verification, and export, with an optional tenant-scoped local agent control plane layered on top.
 
 ## Release Status
 
@@ -33,12 +33,20 @@ python3.11 provider_intel_cli.py status --json
 python3.11 provider_intel_cli.py search --json --preset outreach-ready
 python3.11 provider_intel_cli.py control --json --run-id latest show
 python3.11 provider_intel_cli.py export --json --limit 100
+python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Run a bounded review and export loop"
+python3.11 provider_intel_cli.py --json --tenant acme agent status
 ```
+
+Tenant runtime note:
+
+- No `--tenant`: the CLI uses the legacy default runtime under `data/`, `out/`, and `data/state/`.
+- With `--tenant <id>`: DB, config, checkpoints, outputs, and agent memory move under `storage/tenants/<id>/`.
 
 ## Agent Rules
 
 - Evidence beats inference.
 - Unknown is acceptable; fabricated certainty is not.
 - Approved exports and sales briefs are downstream of QA, not a substitute for QA.
+- The agent layer may orchestrate tools and bounded controls, but it must not write provider truth directly.
 - Use domain controls before changing extraction logic when the issue is crawl noise.
 - Keep test fixtures synthetic; do not add copied third-party HTML to the repo.

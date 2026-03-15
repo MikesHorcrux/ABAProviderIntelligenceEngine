@@ -34,7 +34,7 @@ sequenceDiagram
   participant Runner as pipeline/pipeline.py
   participant Fetch as crawlee_backend.py
   participant DB as provider_intel_v1.db
-  participant Out as out/provider_intel/
+  participant Out as "out/provider_intel/ or tenant-scoped out/provider_intel/"
 
   Op->>CLI: sync --json
   CLI->>Sync: execute_sync(args)
@@ -250,7 +250,7 @@ flowchart TD
 
 Checkpoint behavior from `cli/sync.py` and `pipeline/run_state.py`:
 
-- A run is written to `data/state/agent_runs/run_<id>.json`
+- A run is written to `data/state/agent_runs/run_<id>.json` by default, or `storage/tenants/<tenant_id>/state/agent_runs/run_<id>.json` when `--tenant` is used
 - Each stage is marked `pending`, `running`, `completed`, or `failed`
 - `recovery_pointer` always points to the next incomplete stage
 - `sync --resume <run_id>` or `sync --resume latest` reloads that state and continues
@@ -276,9 +276,9 @@ stateDiagram-v2
 
 | Artifact | Location | Purpose |
 | --- | --- | --- |
-| Run checkpoint | `data/state/agent_runs/run_<id>.json` | Stage state, summary, recovery pointer |
-| Run control | `data/state/agent_runs/control_<id>.json` | Domain controls, runtime counters, interventions |
-| Last manifest | `data/state/last_run_manifest.json` | Latest export summary |
+| Run checkpoint | `data/state/agent_runs/run_<id>.json` by default, or `storage/tenants/<tenant_id>/state/agent_runs/run_<id>.json` | Stage state, summary, recovery pointer |
+| Run control | `data/state/agent_runs/control_<id>.json` by default, or `storage/tenants/<tenant_id>/state/agent_runs/control_<id>.json` | Domain controls, runtime counters, interventions |
+| Last manifest | `data/state/last_run_manifest.json` by default, or `storage/tenants/<tenant_id>/state/last_run_manifest.json` | Latest export summary |
 | Structured logs | stdout from `pipeline/observability.py` | JSON stage logs |
 
 ## Known Behavioral Nuances

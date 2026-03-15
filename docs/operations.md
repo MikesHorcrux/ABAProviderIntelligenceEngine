@@ -9,7 +9,7 @@ Last verified against commit `0c5e92b`.
 - Python `3.11`
 - `pip`
 - Playwright Chromium
-- Writable `data/` and `out/` directories
+- Writable runtime directories under `data/` and `out/` by default, or `storage/tenants/<tenant_id>/` when `--tenant` is used
 
 ### Bootstrap
 
@@ -22,12 +22,18 @@ python3.11 provider_intel_cli.py init --json
 python3.11 provider_intel_cli.py doctor --json
 ```
 
+Tenant-scoped bootstrap:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme init
+python3.11 provider_intel_cli.py --json --tenant acme doctor
+```
+
 Success criteria:
 
 - `doctor.data.summary.failed == 0`
-- `data/provider_intel_v1.db` exists
-- `data/state/agent_runs/` exists
-- `crawler_config.json` and `fetch_policies.json` exist
+- Default runtime: `data/provider_intel_v1.db`, `data/state/agent_runs/`, `crawler_config.json`, and `fetch_policies.json` exist
+- Tenant runtime: `storage/tenants/<tenant_id>/data/provider_intel_v1.db`, `storage/tenants/<tenant_id>/state/agent_runs/`, and `storage/tenants/<tenant_id>/config/` exist
 
 ## Day-2 Operation
 
@@ -43,6 +49,12 @@ Success criteria:
 
 ```bash
 python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
+```
+
+Tenant-scoped bounded run:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme sync --max 10 --limit 25
 ```
 
 ### Refresh-mode bounded run
@@ -66,6 +78,20 @@ python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_
 python3.11 provider_intel_cli.py export --json --limit 100
 ```
 
+### Tenant-scoped agent loop
+
+Use this when you want the local agent control plane to orchestrate the deterministic runtime inside one isolated client or operator workspace.
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Find NJ providers worth outbound this week"
+python3.11 provider_intel_cli.py --json --tenant acme agent status
+```
+
+Requirements:
+
+- `OPENAI_API_KEY` must be set for `agent run` or `agent resume`
+- `agent status` works without model credentials because it only reads stored state
+
 ## Monitoring And Health Checks
 
 The runtime has no separate monitoring service. Operators use:
@@ -84,6 +110,7 @@ Useful health questions:
 - Did QA block all records?
 - Are certain domains repeatedly blocked or quarantined?
 - Did output artifacts update on disk?
+- If using `agent`, did the session store useful tool traces, summaries, and next actions?
 
 ## Operating Commands
 
@@ -91,6 +118,12 @@ Useful health questions:
 
 ```bash
 python3.11 provider_intel_cli.py status --json
+```
+
+Tenant-scoped:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme status
 ```
 
 ### Show run controls
@@ -142,6 +175,13 @@ Recovery:
 python3.11 provider_intel_cli.py sync --json --resume latest
 ```
 
+Tenant-scoped:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme sync --resume latest
+python3.11 provider_intel_cli.py --json --tenant acme agent resume --session-id <session_id>
+```
+
 ### Schema drift or DB corruption symptoms
 
 Symptoms:
@@ -161,6 +201,13 @@ If the DB itself is unusable, move it aside and reinitialize:
 ```bash
 mv data/provider_intel_v1.db data/provider_intel_v1.db.bad
 python3.11 provider_intel_cli.py init --json
+```
+
+Tenant-scoped equivalent:
+
+```bash
+mv storage/tenants/acme/data/provider_intel_v1.db storage/tenants/acme/data/provider_intel_v1.db.bad
+python3.11 provider_intel_cli.py --json --tenant acme init
 ```
 
 This is a rebuild, not an in-place rollback.

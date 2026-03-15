@@ -2,7 +2,7 @@
 
 Last verified against commit `0c5e92b`.
 
-Evidence-backed provider intelligence for New Jersey autism and ADHD diagnostic pathways. The runtime crawls live provider sources, extracts explicit diagnostic and licensing signals, scores confidence, queues uncertain records for review, and exports profiles plus outreach-ready sales briefs.
+Evidence-backed provider intelligence for New Jersey autism and ADHD diagnostic pathways. The runtime crawls live provider sources, extracts explicit diagnostic and licensing signals, scores confidence, queues uncertain records for review, and exports profiles plus outreach-ready sales briefs. A tenant-scoped local agent control plane can orchestrate the same deterministic runtime for isolated client or operator workspaces.
 
 ## Release Status
 
@@ -49,14 +49,16 @@ without weakening the evidence gate.
 
 - Developers extending the crawler, extractors, or export pipeline.
 - Operators running bounded live crawls, resuming failed jobs, and diagnosing noisy domains.
+- Operators or client teams who need isolated per-workspace runtime roots via `--tenant`.
 - Non-technical stakeholders who need vetted provider intelligence instead of raw lead lists.
 
 ## What It Gives You
 
-- A canonical SQLite-backed record set in `data/provider_intel_v1.db`.
-- Evidence-linked provider exports under `out/provider_intel/`.
+- A canonical SQLite-backed record set in `data/provider_intel_v1.db` by default, or `storage/tenants/<tenant_id>/data/provider_intel_v1.db` when `--tenant` is used.
+- Evidence-linked provider exports under `out/provider_intel/` by default, or tenant-scoped outputs under `storage/tenants/<tenant_id>/out/provider_intel/`.
 - Review-queue outputs for records that should not ship as truth yet.
 - Sales-facing briefs for records that pass both factual QA and outreach readiness.
+- A separate tenant-scoped agent memory store at `storage/tenants/<tenant_id>/memory/agent_memory_v1.db` when the `agent` command surface is used.
 
 The runtime is evidence-first. If a critical claim is not source-backed, QA blocks export in `pipeline/stages/qa.py`.
 
@@ -73,11 +75,13 @@ python3.11 provider_intel_cli.py init --json
 python3.11 provider_intel_cli.py doctor --json
 python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
 python3.11 provider_intel_cli.py status --json
+python3.11 provider_intel_cli.py --json --tenant demo agent status
 ```
 
 What to expect:
 
-- `init` creates `crawler_config.json`, `fetch_policies.json`, `data/provider_intel_v1.db`, and `data/state/agent_runs/`.
+- `init` creates `crawler_config.json`, `fetch_policies.json`, `data/provider_intel_v1.db`, and `data/state/agent_runs/` by default.
+- `init` with `--tenant <id>` creates an isolated runtime under `storage/tenants/<id>/`.
 - `doctor` validates Python, config, writable paths, schema metadata, and Crawlee/Playwright availability.
 - `sync` runs `seed_ingest -> crawl -> extract -> resolve -> score -> qa -> export`.
 - `status` summarizes run state, DB counts, and the latest export artifacts.
@@ -93,6 +97,8 @@ python3.11 provider_intel_cli.py search --json --preset outreach-ready
 python3.11 provider_intel_cli.py search --json --preset review-queue
 python3.11 provider_intel_cli.py control --json --run-id latest show
 python3.11 provider_intel_cli.py export --json --limit 100
+python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Find NJ providers worth outbound this week"
+python3.11 provider_intel_cli.py --json --tenant acme agent status
 ```
 
 ## Full Agentic Research Loop
@@ -145,6 +151,9 @@ Use ABAProviderIntelligenceEngine from the repo root. Run the canonical CLI for 
 ## Primary Outputs
 
 Runs write to `out/provider_intel/`:
+
+When `--tenant <id>` is used, the same export tree is created under
+`storage/tenants/<id>/out/provider_intel/`.
 
 - `provider_records_<run_id>.csv`
 - `provider_records_<run_id>.json`

@@ -31,11 +31,26 @@ python3.11 provider_intel_cli.py search --json --preset review-queue
 python3.11 provider_intel_cli.py export --json --limit 100
 ```
 
+Tenant-scoped agent flow:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme init
+python3.11 provider_intel_cli.py --json --tenant acme doctor
+python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Run a bounded provider-intel loop"
+python3.11 provider_intel_cli.py --json --tenant acme agent status
+```
+
+Runtime note:
+
+- No `--tenant`: use the legacy shared local runtime.
+- With `--tenant`: DB, config, checkpoints, outputs, and agent memory are isolated under `storage/tenants/<tenant_id>/`.
+
 ## Non-Negotiable Rules
 
 - Never claim ASD/ADHD diagnostic capability, license status, or prescribing authority without evidence.
 - Treat `review_queue` as a safety lane, not a failure.
 - Do not weaken QA to increase export counts.
+- Do not let the agent layer write provider truth directly; it must orchestrate the deterministic runtime instead.
 - Keep `record_confidence` and `outreach_fit_score` separate.
 - Use bounded runs before broadening seeds or page caps.
 - Keep fixtures synthetic; do not add copied third-party site captures.

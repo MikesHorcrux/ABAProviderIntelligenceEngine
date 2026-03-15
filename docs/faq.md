@@ -4,7 +4,7 @@ Last verified against commit `0c5e92b`.
 
 ## What does this project actually do?
 
-It crawls provider sources, extracts evidence of ASD/ADHD diagnostic capability plus license and prescribing signals, scores confidence, queues uncertain records for review, and exports approved profiles and outreach briefs.
+It crawls provider sources, extracts evidence of ASD/ADHD diagnostic capability plus license and prescribing signals, scores confidence, queues uncertain records for review, and exports approved profiles and outreach briefs. It also has an optional tenant-scoped local agent control plane that can orchestrate those same deterministic workflows.
 
 ## Is this a lead scraper?
 
@@ -46,6 +46,18 @@ tables on a fresh run.
 Yes for the current sync run. It overrides the effective browser headless mode
 without requiring you to rewrite `crawler_config.json`.
 
+## What is a tenant?
+
+A tenant is an isolated local workspace for one client, account, or operator context. When you run with `--tenant acme`, the runtime DB, config, checkpoints, outputs, and agent memory move under `storage/tenants/acme/` instead of using the shared default paths.
+
+## Is a tenant the same thing as a seed pack?
+
+No. A tenant answers “whose workspace is this?” A seed pack answers “what sources should this run crawl?”
+
+## Does the project now have an agent command?
+
+Yes. `provider_intel_cli.py agent run|status|resume` adds a tenant-scoped local agent control plane. It can orchestrate `doctor`, `sync`, `status`, `search`, `control`, `export`, and read-only `sql`, but it does not write provider truth directly.
+
 ## How do I stop a noisy domain without editing code?
 
 Use `control` commands such as `suppress-prefix`, `cap-domain`, `stop-domain`, or `quarantine-seed`.
@@ -69,7 +81,7 @@ No. Current PDF output is a minimal fallback writer in `pipeline/stages/export.p
 
 ## Is there a remote service or API?
 
-No. This is a local CLI and file-backed runtime.
+There is no hosted service built into the repo. This is still a local CLI and file-backed runtime. The `agent run` and `agent resume` commands can make outbound calls to the OpenAI Responses API when `OPENAI_API_KEY` is set, but the runtime itself remains local-first.
 
 ## What should a new engineer read first?
 

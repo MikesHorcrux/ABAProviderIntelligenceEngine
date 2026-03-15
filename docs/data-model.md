@@ -145,11 +145,11 @@ Practice identity is domain-based:
 
 These are not stored in SQLite:
 
-- `data/state/agent_runs/run_<id>.json`
+- `data/state/agent_runs/run_<id>.json` by default
   Stage checkpoint and summary state
-- `data/state/agent_runs/control_<id>.json`
+- `data/state/agent_runs/control_<id>.json` by default
   Domain controls, runtime counters, and interventions
-- `data/state/last_run_manifest.json`
+- `data/state/last_run_manifest.json` by default
   Last export summary written by `pipeline/pipeline.py`
 
 When `--tenant` is used, these move under `storage/tenants/<tenant_id>/state/`.

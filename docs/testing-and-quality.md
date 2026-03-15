@@ -11,8 +11,14 @@ The current suite is mostly contract and fixture driven. It proves the core pipe
 | Area | Files | What is covered |
 | --- | --- | --- |
 | CLI contracts | `tests/test_agent_cli.py` | `init`, `search`, `status`, `sql`, `export` JSON/plain behavior |
+| Tenant runtime paths | `tests/test_runtime_context.py` | default path compatibility, tenant path derivation, tenant CLI bootstrap |
 | Run-state and resume | `tests/test_run_state.py` | checkpoint creation, failed-stage resume, run-control finalization |
 | Config loading | `tests/test_fetch_config.py` | default config values and env overrides |
+| Agent memory | `tests/test_agent_memory.py` | sessions, turns, tool events, run memory, domain tactics, client profiles |
+| Agent policy | `tests/test_agent_policy.py` | bounded tool allowlist, reason requirement, control validation |
+| OpenAI adapter | `tests/test_openai_adapter.py` | Responses request shape, tool-call parsing, transient retry behavior |
+| Agent orchestration | `tests/test_agent_orchestrator.py` | full operator loop, tenant isolation, failed-sync recovery and resume |
+| CLI schema contracts | `tests/test_cli_contracts.py` | `status`, `agent run`, and `agent status` schema compatibility |
 | Fetch core behavior | `tests/test_fetch_dispatch.py` | domain policies, block detection, telemetry recording |
 | Optional local fetch integration | `tests/test_fetch_integration.py` | local HTTP server with HTTP and browser modes, gated by env |
 | Extraction | `tests/test_parse_stage.py` | practice page parsing, blocked board handling, board enrichment parsing, hospital/university fixtures |
@@ -48,8 +54,14 @@ Core suite:
 
 ```bash
 PYTHONPATH=$PWD python3.11 tests/test_agent_cli.py
+PYTHONPATH=$PWD python3.11 tests/test_runtime_context.py
 PYTHONPATH=$PWD python3.11 tests/test_run_state.py
 PYTHONPATH=$PWD python3.11 tests/test_fetch_config.py
+PYTHONPATH=$PWD python3.11 tests/test_agent_memory.py
+PYTHONPATH=$PWD python3.11 tests/test_agent_policy.py
+PYTHONPATH=$PWD python3.11 tests/test_openai_adapter.py
+PYTHONPATH=$PWD python3.11 tests/test_agent_orchestrator.py
+PYTHONPATH=$PWD python3.11 tests/test_cli_contracts.py
 PYTHONPATH=$PWD python3.11 tests/test_fetch_dispatch.py
 PYTHONPATH=$PWD python3.11 tests/test_parse_stage.py
 PYTHONPATH=$PWD python3.11 tests/test_resolve_stage.py
@@ -68,6 +80,7 @@ CLI sanity checks:
 PYTHONPATH=$PWD python3.11 provider_intel_cli.py doctor --json
 PYTHONPATH=$PWD python3.11 provider_intel_cli.py status --json
 PYTHONPATH=$PWD python3.11 provider_intel_cli.py search --json --preset outreach-ready
+PYTHONPATH=$PWD python3.11 provider_intel_cli.py --json --tenant demo agent status
 ```
 
 ## Quality Gates In Code
@@ -87,10 +100,11 @@ The runtime already encodes some release-quality rules:
 - core test suite passes
 - optional fetch integration passes on at least one supported environment
 - bounded live run completes without runtime exceptions
+- tenant-scoped bootstrap and `agent status` work on a clean workspace
 - approved record outputs contain evidence-backed critical fields
 - review queue is non-empty when source ambiguity exists
 - sales report only contains approved outreach-ready rows
-- docs still match CLI flags and stage behavior
+- docs still match CLI flags, tenant path behavior, and stage behavior
 
 ## Recommended Next Quality Improvements
 
