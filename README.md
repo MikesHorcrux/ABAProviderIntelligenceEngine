@@ -78,6 +78,12 @@ python3.11 provider_intel_cli.py status --json
 python3.11 provider_intel_cli.py --json --tenant demo agent status
 ```
 
+If you want a shorter human-facing wrapper from the repo root, use `./ae`. It
+forwards canonical commands unchanged and adds ergonomic agent aliases such as
+`./ae run --tenant demo "Run a bounded provider-intel loop"`.
+Add `--trace` if you want live observable agent activity on stderr while the
+session runs.
+
 What to expect:
 
 - `init` creates `crawler_config.json`, `fetch_policies.json`, `data/provider_intel_v1.db`, and `data/state/agent_runs/` by default.
@@ -99,6 +105,9 @@ python3.11 provider_intel_cli.py control --json --run-id latest show
 python3.11 provider_intel_cli.py export --json --limit 100
 python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Find NJ providers worth outbound this week"
 python3.11 provider_intel_cli.py --json --tenant acme agent status
+./ae init --json
+./ae run --json --tenant acme "Find NJ providers worth outbound this week"
+./ae session-status --json --tenant acme
 ```
 
 ## Full Agentic Research Loop
@@ -201,6 +210,7 @@ Use `seed_packs/examples/cassia_live_test.json` for a bounded live test:
 python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
 ```
 
-## Legacy Note
+## Compatibility Note
 
-`cannaradar_cli.py` is intentionally retired and exits immediately with a redirect to `provider_intel_cli.py`.
+Use `provider_intel_cli.py` or the repo-local `./ae` wrapper. Older retired
+entrypoints are not part of the supported public interface.

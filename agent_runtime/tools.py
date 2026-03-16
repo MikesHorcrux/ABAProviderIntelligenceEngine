@@ -393,7 +393,6 @@ class ToolRegistry:
         updates = {
             "PROVIDER_INTEL_CONFIG": str(paths.config_path),
             "PROVIDER_INTEL_CRAWLER_CONFIG": str(paths.config_path),
-            "CANNARADAR_CRAWLER_CONFIG": str(paths.config_path),
         }
         previous = {key: os.environ.get(key) for key in updates}
         try:

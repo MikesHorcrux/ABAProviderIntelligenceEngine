@@ -38,7 +38,6 @@ Supported config/env entrypoints:
 Notes:
 
 - These are convenience config inputs, not a secret management system.
-- Legacy `CANNARADAR_*` aliases remain accepted for compatibility, but new automation should prefer the `PROVIDER_INTEL_*` names.
 - Proxy URLs may contain credentials depending on how the operator configures them, so treat config and shell history accordingly.
 - The current code does not redact config values before logging them elsewhere.
 

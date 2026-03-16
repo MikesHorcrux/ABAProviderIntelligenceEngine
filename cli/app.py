@@ -116,6 +116,7 @@ def make_parser() -> argparse.ArgumentParser:
     agent_run.add_argument("--goal", required=True)
     agent_run.add_argument("--session-id", default=None)
     agent_run.add_argument("--model", default=None)
+    agent_run.add_argument("--trace", action="store_true", help="Stream observable agent activity to stderr while the session runs.")
 
     agent_status = agent_sub.add_parser("status", help="Show stored status for a tenant agent session.")
     agent_status.add_argument("--session-id", default=None)
@@ -123,6 +124,7 @@ def make_parser() -> argparse.ArgumentParser:
     agent_resume = agent_sub.add_parser("resume", help="Resume a stored tenant agent session.")
     agent_resume.add_argument("--session-id", required=True)
     agent_resume.add_argument("--model", default=None)
+    agent_resume.add_argument("--trace", action="store_true", help="Stream observable agent activity to stderr while the session runs.")
     return parser
 
 
@@ -240,7 +242,6 @@ def main(argv: list[str] | None = None) -> int:
             resolved = str(Path(args.config).expanduser().resolve())
             os.environ["PROVIDER_INTEL_CONFIG"] = resolved
             os.environ["PROVIDER_INTEL_CRAWLER_CONFIG"] = resolved
-            os.environ["CANNARADAR_CRAWLER_CONFIG"] = resolved
         if getattr(args, "tenant", None):
             os.environ["PROVIDER_INTEL_TENANT_ID"] = str(args.tenant)
         os.environ["PROVIDER_INTEL_OUT_ROOT"] = str(runtime_paths.out_root)

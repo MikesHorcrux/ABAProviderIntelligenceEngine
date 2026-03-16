@@ -39,12 +39,15 @@ class OpenAIResponsesAdapter(ModelAdapter):
         messages: list[ModelMessage],
         tools: list[ToolDefinition],
         model: str,
+        previous_response_id: str | None = None,
     ) -> ModelResponse:
         payload = {
             "model": model,
             "instructions": instructions,
             "input": [self._serialize_message(item) for item in messages],
         }
+        if previous_response_id:
+            payload["previous_response_id"] = previous_response_id
         if tools:
             payload["tools"] = [self._serialize_tool(tool) for tool in tools]
 
@@ -52,6 +55,7 @@ class OpenAIResponsesAdapter(ModelAdapter):
         return ModelResponse(
             text=self._extract_text(raw),
             tool_calls=self._extract_tool_calls(raw),
+            response_id=str(raw.get("id") or ""),
             raw={"agent_name": agent_name, **raw},
         )
 

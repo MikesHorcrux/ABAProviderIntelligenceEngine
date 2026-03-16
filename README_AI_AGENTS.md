@@ -37,6 +37,10 @@ python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Run a bo
 python3.11 provider_intel_cli.py --json --tenant acme agent status
 ```
 
+For human operators, the repo-local `./ae` wrapper can shorten the same
+workflows. Agents should still prefer the canonical `provider_intel_cli.py`
+surface because it is the stable tool contract.
+
 Tenant runtime note:
 
 - No `--tenant`: the CLI uses the legacy default runtime under `data/`, `out/`, and `data/state/`.

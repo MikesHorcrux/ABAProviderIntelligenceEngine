@@ -31,6 +31,7 @@ class ModelMessage:
 class ModelResponse:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
+    response_id: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -46,5 +47,6 @@ class ModelAdapter(ABC):
         messages: list[ModelMessage],
         tools: list[ToolDefinition],
         model: str,
+        previous_response_id: str | None = None,
     ) -> ModelResponse:
         raise NotImplementedError

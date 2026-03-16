@@ -42,6 +42,8 @@ def test_load_crawl_config_defaults_include_crawlee_settings() -> None:
     assert cfg.agent_research_enabled is True
     assert cfg.agent_research_limit == 25
     assert cfg.agent_research_min_score == 48
+    assert "/search" in cfg.agent_research_paths
+    assert "/verify-a-license" in cfg.agent_research_paths
     assert cfg.seed_file == "seed_packs/nj/seed_pack.json"
     assert "/diagnosis" in cfg.agent_research_paths
 
@@ -92,26 +94,9 @@ def test_env_overrides_apply_to_crawlee_settings() -> None:
         assert cfg.agent_research_min_score == 62
 
 
-def test_legacy_cannaradar_env_alias_still_works() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        config_path = Path(td) / "crawler_config.json"
-        config_path.write_text(json.dumps({"seedFile": "seed_packs/nj/seed_pack.json"}), encoding="utf-8")
-        previous = _set_env(
-            PROVIDER_INTEL_CRAWLEE_HEADLESS=None,
-            CANNARADAR_CRAWLEE_HEADLESS="off",
-        )
-        try:
-            cfg = load_crawl_config(config_path)
-        finally:
-            _restore_env(previous)
-
-        assert cfg.crawlee_headless is False
-
-
 def main() -> None:
     test_load_crawl_config_defaults_include_crawlee_settings()
     test_env_overrides_apply_to_crawlee_settings()
-    test_legacy_cannaradar_env_alias_still_works()
     print("test_fetch_config: ok")
 
 

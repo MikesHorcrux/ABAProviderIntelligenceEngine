@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import replace
+from typing import Any
 
 from agent_runtime.config import load_agent_config
 from agent_runtime.memory import MemoryStore, SessionStore
@@ -16,8 +19,8 @@ from runtime_context import TenantContext
 class _UnavailableModelAdapter(ModelAdapter):
     provider_name = "unavailable"
 
-    def generate(self, *, agent_name: str, instructions: str, messages, tools, model: str) -> ModelResponse:  # noqa: ANN001
-        del agent_name, instructions, messages, tools, model
+    def generate(self, *, agent_name: str, instructions: str, messages, tools, model: str, previous_response_id: str | None = None) -> ModelResponse:  # noqa: ANN001
+        del agent_name, instructions, messages, tools, model, previous_response_id
         raise UsageError("This command does not support model generation.")
 
 
@@ -27,6 +30,38 @@ def _tenant_context_from_args(args) -> TenantContext:
         tenant_root_base=None,
         runtime_paths=getattr(args, "runtime_paths"),
     )
+
+
+def _format_trace_event(event: dict[str, Any]) -> str:
+    event_type = str(event.get("type") or "")
+    if event_type == "session_started":
+        return f"[agent] session started tenant={event.get('tenant_id')} session={event.get('session_id')}"
+    if event_type == "session_completed":
+        run_ids = ",".join(str(item) for item in event.get("run_ids") or [])
+        return f"[agent] session completed session={event.get('session_id')} runs={run_ids or '-'}"
+    if event_type == "session_failed":
+        return f"[agent] session failed session={event.get('session_id')} error={event.get('error')}"
+    if event_type == "agent_message":
+        text = " ".join(str(event.get("text") or "").split())
+        text = text[:240] + ("..." if len(text) > 240 else "")
+        return f"[agent] {event.get('agent_name')}: {text}"
+    if event_type == "tool_call_requested":
+        arguments = dict(event.get("arguments") or {})
+        reason = str(arguments.get("reason") or "").strip()
+        return f"[agent] tool request name={event.get('tool_name')} reason={reason or '-'}"
+    if event_type == "tool_call_completed":
+        return f"[agent] tool result name={event.get('tool_name')} ok={event.get('ok')} summary={event.get('summary')}"
+    return f"[agent] {json.dumps(event, default=str, sort_keys=True)}"
+
+
+def _trace_hook_from_args(args):  # noqa: ANN001
+    if not getattr(args, "trace", False):
+        return None
+
+    def _emit(event: dict[str, Any]) -> None:
+        print(_format_trace_event(event), file=sys.stderr, flush=True)
+
+    return _emit
 
 
 def _build_orchestrator(args, *, model_adapter=None, require_model: bool = True) -> AgentOrchestrator:
@@ -62,6 +97,7 @@ def _build_orchestrator(args, *, model_adapter=None, require_model: bool = True)
         session_store=session_store,
         memory_store=memory_store,
         tool_registry=tool_registry,
+        trace_hook=_trace_hook_from_args(args),
     )
 
 

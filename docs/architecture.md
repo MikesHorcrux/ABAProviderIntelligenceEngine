@@ -12,6 +12,10 @@ provider intelligence runtime. It has two execution surfaces:
 - an optional tenant-scoped local agent control plane exposed through
   `agent run`, `agent status`, and `agent resume`
 
+For operators, the repo also ships `./ae` as a thin translation layer on top of
+the canonical CLI. It does not add a third runtime path; it only shortens the
+same command surface.
+
 The architectural boundary is strict:
 
 - `crawl -> extract -> resolve -> score -> qa -> export` remains the only path
@@ -27,6 +31,7 @@ The architectural boundary is strict:
 
 | Surface | Entry points | Responsibility | Writes truth? |
 | --- | --- | --- | --- |
+| Operator wrapper | `./ae`, `cli/ae.py` | Translate a small operator-friendly command set into canonical CLI arguments | No |
 | Deterministic runtime | `provider_intel_cli.py`, `cli/app.py`, `cli/sync.py`, `cli/query.py`, `cli/control.py`, `cli/doctor.py` | Crawl, extract, resolve, score, QA, export, and inspect the provider-intel runtime | Yes |
 | Agent control plane | `cli/agent.py`, `agent_runtime/*` | Plan bounded work, call the deterministic runtime as tools, persist agent memory, and produce operator summaries | No |
 
@@ -43,8 +48,8 @@ In this codebase, a tenant means a client/account/workspace boundary such as
 what gets crawled; tenants define where runtime state lives.
 
 Tenant isolation is implemented in
-[runtime_context.py](/Users/horcrux/Development/CannaRadar/runtime_context.py)
-through `RuntimePaths` and `TenantContext`. The implementation does not add
+[`runtime_context.py`](../runtime_context.py) through `RuntimePaths` and
+`TenantContext`. The implementation does not add
 `tenant_id` columns to `provider_intel.v1` tables. Instead, each tenant gets a
 separate filesystem root and separate SQLite files.
 
@@ -99,7 +104,8 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  CLI["provider_intel_cli.py"] --> APP["cli/app.py"]
+  AE["./ae"] --> CLI["provider_intel_cli.py"]
+  CLI --> APP["cli/app.py"]
   APP --> RCX["runtime_context.py"]
   APP --> DET["Deterministic commands"]
   APP --> AG["cli/agent.py"]
@@ -127,12 +133,12 @@ for all business truth, approvals, contradictions, review queues, and exports.
 
 Primary implementation files:
 
-- [cli/sync.py](/Users/horcrux/Development/CannaRadar/cli/sync.py)
-- [pipeline/pipeline.py](/Users/horcrux/Development/CannaRadar/pipeline/pipeline.py)
-- [pipeline/run_state.py](/Users/horcrux/Development/CannaRadar/pipeline/run_state.py)
-- [cli/query.py](/Users/horcrux/Development/CannaRadar/cli/query.py)
-- [cli/control.py](/Users/horcrux/Development/CannaRadar/cli/control.py)
-- [cli/doctor.py](/Users/horcrux/Development/CannaRadar/cli/doctor.py)
+- [`cli/sync.py`](../cli/sync.py)
+- [`pipeline/pipeline.py`](../pipeline/pipeline.py)
+- [`pipeline/run_state.py`](../pipeline/run_state.py)
+- [`cli/query.py`](../cli/query.py)
+- [`cli/control.py`](../cli/control.py)
+- [`cli/doctor.py`](../cli/doctor.py)
 
 ### Stage Order
 
@@ -189,13 +195,13 @@ adapters.
 
 Primary implementation files:
 
-- [cli/agent.py](/Users/horcrux/Development/CannaRadar/cli/agent.py)
-- [agent_runtime/orchestrator.py](/Users/horcrux/Development/CannaRadar/agent_runtime/orchestrator.py)
-- [agent_runtime/tools.py](/Users/horcrux/Development/CannaRadar/agent_runtime/tools.py)
-- [agent_runtime/policy.py](/Users/horcrux/Development/CannaRadar/agent_runtime/policy.py)
-- [agent_runtime/memory.py](/Users/horcrux/Development/CannaRadar/agent_runtime/memory.py)
-- [agent_runtime/config.py](/Users/horcrux/Development/CannaRadar/agent_runtime/config.py)
-- [agent_runtime/openai_adapter.py](/Users/horcrux/Development/CannaRadar/agent_runtime/openai_adapter.py)
+- [`cli/agent.py`](../cli/agent.py)
+- [`agent_runtime/orchestrator.py`](../agent_runtime/orchestrator.py)
+- [`agent_runtime/tools.py`](../agent_runtime/tools.py)
+- [`agent_runtime/policy.py`](../agent_runtime/policy.py)
+- [`agent_runtime/memory.py`](../agent_runtime/memory.py)
+- [`agent_runtime/config.py`](../agent_runtime/config.py)
+- [`agent_runtime/openai_adapter.py`](../agent_runtime/openai_adapter.py)
 
 ### Entry-Point Flow
 
@@ -421,7 +427,7 @@ the model for that invocation; it does not rewrite tenant config.
 
 The control plane is designed around the provider-neutral
 `ModelAdapter` interface in
-[agent_runtime/models.py](/Users/horcrux/Development/CannaRadar/agent_runtime/models.py).
+[`agent_runtime/models.py`](../agent_runtime/models.py).
 
 Current shipped backend:
 

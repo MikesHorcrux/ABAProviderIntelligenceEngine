@@ -29,6 +29,13 @@ python3.11 provider_intel_cli.py --json --tenant acme init
 python3.11 provider_intel_cli.py --json --tenant acme doctor
 ```
 
+Operator-friendly equivalent from the repo root:
+
+```bash
+./ae --json init
+./ae --json --tenant acme doctor
+```
+
 Success criteria:
 
 - `doctor.data.summary.failed == 0`
@@ -83,14 +90,22 @@ python3.11 provider_intel_cli.py export --json --limit 100
 Use this when you want the local agent control plane to orchestrate the deterministic runtime inside one isolated client or operator workspace.
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Find NJ providers worth outbound this week"
+python3.11 provider_intel_cli.py --json --tenant acme agent run --trace --goal "Find NJ providers worth outbound this week"
 python3.11 provider_intel_cli.py --json --tenant acme agent status
+```
+
+Operator-friendly equivalent:
+
+```bash
+./ae --json --tenant acme run --trace "Find NJ providers worth outbound this week"
+./ae --json --tenant acme session-status
 ```
 
 Requirements:
 
 - `OPENAI_API_KEY` must be set for `agent run` or `agent resume`
 - `agent status` works without model credentials because it only reads stored state
+- `--trace` writes human-readable agent activity to stderr while preserving machine-readable stdout
 
 ## Monitoring And Health Checks
 

@@ -29,7 +29,6 @@ def resolve_config_path(cli_value: str | None) -> Path:
     env_value = (
         os.environ.get("PROVIDER_INTEL_CONFIG")
         or os.environ.get("PROVIDER_INTEL_CRAWLER_CONFIG")
-        or os.environ.get("CANNARADAR_CRAWLER_CONFIG")
     )
     if env_value:
         return Path(env_value).expanduser().resolve()

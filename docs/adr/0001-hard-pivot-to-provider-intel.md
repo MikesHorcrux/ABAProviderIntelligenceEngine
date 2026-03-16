@@ -26,4 +26,3 @@ Make a hard break to a provider-intel product surface instead of preserving comp
 - `provider_intel_cli.py`
 - `db/schema.sql`
 - `jobs/ingest_sources.py`
-- `cannaradar_cli.py`

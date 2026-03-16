@@ -19,8 +19,8 @@ class FakeModelAdapter(ModelAdapter):
     def __init__(self, scripts: dict[str, list[ModelResponse]]):
         self.scripts = {key: list(value) for key, value in scripts.items()}
 
-    def generate(self, *, agent_name: str, instructions: str, messages, tools, model: str) -> ModelResponse:  # noqa: ANN001
-        del instructions, messages, tools, model
+    def generate(self, *, agent_name: str, instructions: str, messages, tools, model: str, previous_response_id: str | None = None) -> ModelResponse:  # noqa: ANN001
+        del instructions, messages, tools, model, previous_response_id
         queue = self.scripts.get(agent_name) or []
         if not queue:
             return ModelResponse(text=f"{agent_name} idle")
@@ -256,10 +256,55 @@ def test_agent_orchestrator_can_resume_after_failed_sync() -> None:
         assert "resume" in tool_names
 
 
+def test_agent_orchestrator_emits_trace_events() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        events: list[dict[str, Any]] = []
+        context = build_tenant_context(tenant_id="tenant-trace", tenant_root_base=Path(td))
+        session_store = SessionStore(context.runtime_paths.agent_memory_db_path)
+        memory_store = MemoryStore(context.runtime_paths.agent_memory_db_path)
+        model = FakeModelAdapter(
+            {
+                "RunOpsAgent": [
+                    ModelResponse(
+                        text="Checking runtime.",
+                        tool_calls=[ToolCall("call_status", "status", {"reason": "Inspect counts"})],
+                    ),
+                    ModelResponse(text="RunOpsAgent complete."),
+                ],
+                "ReviewAgent": [ModelResponse(text="Review summary.")],
+                "ClientBriefAgent": [ModelResponse(text="Client summary.")],
+                "SupervisorAgent": [ModelResponse(text="Supervisor summary.")],
+            }
+        )
+        registry = FakeToolRegistry(
+            tenant_id="tenant-trace",
+            tenant_root=context.runtime_paths.tenant_root or Path(td),
+            session_store=session_store,
+            memory_store=memory_store,
+        )
+        orchestrator = AgentOrchestrator(
+            config=AgentConfig(provider="fake", model="fake-model"),
+            model_adapter=model,
+            session_store=session_store,
+            memory_store=memory_store,
+            tool_registry=registry,
+            trace_hook=events.append,
+        )
+        result = orchestrator.run("Inspect trace behavior", context)
+
+        assert result["session_id"]
+        event_types = [event["type"] for event in events]
+        assert "session_started" in event_types
+        assert "tool_call_requested" in event_types
+        assert "tool_call_completed" in event_types
+        assert "session_completed" in event_types
+
+
 def main() -> None:
     test_agent_orchestrator_runs_full_operator_loop_and_records_memory()
     test_agent_orchestrator_isolates_tenants()
     test_agent_orchestrator_can_resume_after_failed_sync()
+    test_agent_orchestrator_emits_trace_events()
     print("test_agent_orchestrator: ok")
 
 
