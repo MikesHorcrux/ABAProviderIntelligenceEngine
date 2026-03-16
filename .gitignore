@@ -12,3 +12,4 @@ __pycache__/
 .env.local
 .env.*
 !.env.example
+tmp/

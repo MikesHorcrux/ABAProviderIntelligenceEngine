@@ -10,8 +10,10 @@ What the code actually does:
 
 - Reads local config and seed files
 - Performs outbound web requests to provider/source domains
+- Can optionally call the OpenAI Responses API for the tenant-scoped agent control plane
 - Stores raw fetched HTML in SQLite
-- Exports local files under `out/provider_intel/`
+- Exports local files under `out/provider_intel/` by default, or tenant-scoped output roots under `storage/tenants/<tenant_id>/out/provider_intel/`
+- Stores agent session and memory data in a separate per-tenant SQLite file when `agent` commands are used
 
 What it does not do:
 
@@ -31,11 +33,11 @@ Supported config/env entrypoints:
 - `PROVIDER_INTEL_CRAWLEE_HEADLESS`
 - `PROVIDER_INTEL_CRAWLEE_PROXY_URLS`
 - `PROVIDER_INTEL_CRAWLEE_DOMAIN_POLICIES_FILE`
+- `OPENAI_API_KEY`
 
 Notes:
 
 - These are convenience config inputs, not a secret management system.
-- Legacy `CANNARADAR_*` aliases remain accepted for compatibility, but new automation should prefer the `PROVIDER_INTEL_*` names.
 - Proxy URLs may contain credentials depending on how the operator configures them, so treat config and shell history accordingly.
 - The current code does not redact config values before logging them elsewhere.
 
@@ -75,8 +77,9 @@ Persisted locally:
 
 - Raw HTML in `source_documents.content`
 - Evidence quotes and URLs in `field_evidence`
-- Exported provider and sales artifacts in `out/provider_intel/`
-- Run checkpoints in `data/state/agent_runs/`
+- Exported provider and sales artifacts in `out/provider_intel/` by default, or tenant-scoped output roots under `storage/tenants/<tenant_id>/out/provider_intel/`
+- Run checkpoints in `data/state/agent_runs/` by default, or tenant-scoped state roots under `storage/tenants/<tenant_id>/state/agent_runs/`
+- Per-tenant agent sessions, tool traces, run memory, domain tactics, and client profiles in `agent_memory_v1.db`
 
 Operational implications:
 
@@ -122,3 +125,4 @@ Explicit boundaries reflected in code and docs:
 - No separate secret store.
 - No permission separation between “operator” and “developer.”
 - Raw HTML retention may exceed what some teams want for long-term storage; that policy has to be enforced operationally.
+- The OpenAI adapter uses the process environment for API credentials; there is no first-party credential vault in the repo.

@@ -18,7 +18,7 @@ Last verified against commit `0c5e92b`.
 ## Canonical Workflow
 
 ```bash
-cd /Users/horcrux/Development/CannaRadar
+cd <repo-root>
 python3.11 provider_intel_cli.py init --json
 python3.11 provider_intel_cli.py doctor --json
 python3.11 provider_intel_cli.py sync --json --max 10 --limit 25

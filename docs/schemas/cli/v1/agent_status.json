@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://provider-intel.local/schemas/cli/v1/agent_status.json",
+  "title": "Provider Intel agent status output",
+  "type": "object",
+  "required": ["schema_version", "command", "ok", "data"],
+  "properties": {
+    "schema_version": { "const": "provider_intel.cli.v1" },
+    "command": { "const": "agent" },
+    "ok": { "type": "boolean" },
+    "message": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["tenant_id", "session", "turns", "tool_events", "run_memory", "domain_tactics", "client_profiles"],
+      "properties": {
+        "tenant_id": { "type": "string" },
+        "session": { "type": "object" },
+        "turns": { "type": "array", "items": { "type": "object" } },
+        "tool_events": { "type": "array", "items": { "type": "object" } },
+        "run_memory": { "type": "array", "items": { "type": "object" } },
+        "domain_tactics": { "type": "array", "items": { "type": "object" } },
+        "client_profiles": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

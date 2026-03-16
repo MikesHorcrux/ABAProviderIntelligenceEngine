@@ -2,7 +2,50 @@
 
 Last verified against commit `0c5e92b`.
 
-The canonical CLI entrypoint is `provider_intel_cli.py`. The retired `cannaradar_cli.py` only exits with a redirect message.
+The canonical CLI entrypoint is `provider_intel_cli.py`.
+
+The repo also ships a thin human-facing wrapper at `./ae`. It forwards
+canonical commands unchanged and adds a small set of convenience aliases for
+agent sessions. The canonical machine interface remains `provider_intel_cli.py`.
+
+## Friendly Wrapper
+
+From the repo root:
+
+```bash
+./ae init --json
+./ae sync --json --max 3 --limit 10
+./ae status --json
+./ae run --json --trace --tenant acme "Run a bounded provider-intel loop"
+./ae session-status --json --tenant acme
+./ae session-resume --json --tenant acme --session-id sess_123
+```
+
+Wrapper rules:
+
+- Canonical commands such as `init`, `doctor`, `sync`, `status`, `search`,
+  `control`, `sql`, `export`, and `agent` pass through unchanged.
+- `run` maps to `agent run --goal ...`.
+- `session-status` maps to `agent status`.
+- `session-resume` maps to `agent resume`.
+- `--trace` on `run` and `session-resume` streams visible agent activity to
+  stderr without breaking JSON stdout.
+- The wrapper does not replace the canonical CLI contract; it is a translation
+  layer for operators.
+
+```mermaid
+flowchart LR
+  AE["./ae"] --> PASS["Pass-through canonical commands"]
+  AE --> ALIAS["Operator aliases"]
+  PASS --> CANON["provider_intel_cli.py"]
+  ALIAS --> RUN["run -> agent run --goal ..."]
+  ALIAS --> STATUS["session-status -> agent status"]
+  ALIAS --> RESUME["session-resume -> agent resume"]
+  RUN --> CANON
+  STATUS --> CANON
+  RESUME --> CANON
+  CANON --> JSON["Stable JSON/plaintext contract"]
+```
 
 ## Global Flags
 
@@ -10,7 +53,9 @@ The canonical CLI entrypoint is `provider_intel_cli.py`. The retired `cannaradar
 | --- | --- | --- |
 | `--db` | Alternate SQLite path | Defaults to `data/provider_intel_v1.db` |
 | `--db-timeout-ms` | SQLite timeout in milliseconds | Applied to writable and read-only CLI DB connections, and mirrored to `PRAGMA busy_timeout` |
-| `--config` | Alternate `crawler_config.json` | Also sets `PROVIDER_INTEL_CONFIG`, `PROVIDER_INTEL_CRAWLER_CONFIG`, and the legacy compatibility alias `CANNARADAR_CRAWLER_CONFIG` for the process |
+| `--config` | Alternate `crawler_config.json` | Also sets `PROVIDER_INTEL_CONFIG` and `PROVIDER_INTEL_CRAWLER_CONFIG` for the process |
+| `--tenant` | Tenant id for an isolated runtime root | When set, default DB/config/checkpoint/output paths move under `storage/tenants/<tenant_id>/` unless explicitly overridden |
+| `--tenant-root-base` | Override the base directory for tenant runtime roots | Used only when `--tenant` is set |
 | `--json` | Emit strict JSON envelope | Uses schema `provider_intel.cli.v1` |
 | `--plain` | Emit plain-text output | Default |
 
@@ -92,7 +137,7 @@ Additional flags:
 
 ### `status`
 
-Summarize current DB counts, last manifest, checkpoint state, run control state, and output snapshots.
+Summarize current DB counts, last manifest, checkpoint state, run control state, output snapshots, DB metadata, and recent failures.
 
 ```bash
 python3.11 provider_intel_cli.py status --json
@@ -189,6 +234,37 @@ python3.11 provider_intel_cli.py export --json --limit 100
 Flags:
 
 - `--limit`
+
+### `agent`
+
+Run the tenant-scoped provider agent control plane. `agent` commands require `--tenant`.
+
+Run a session:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme agent run --trace --goal "Find NJ providers worth outbound this week"
+python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Resume the last bounded refresh loop" --session-id sess_123 --model gpt-5
+```
+
+Inspect a stored session:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme agent status
+python3.11 provider_intel_cli.py --json --tenant acme agent status --session-id sess_123
+```
+
+Resume a stored session:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme agent resume --session-id sess_123
+```
+
+Agent runtime notes:
+
+- Each tenant gets its own config, DB, checkpoints, outputs, and agent memory store.
+- The deterministic pipeline remains the source of truth; the agent orchestrates tools around it.
+- The first model adapter targets the OpenAI Responses API, but the internal model/tool contract is provider-neutral.
+- `--trace` writes human-readable session activity to stderr so operators can watch tool calls without breaking `--json` stdout.
 
 ## JSON Envelope
 

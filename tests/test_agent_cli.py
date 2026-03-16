@@ -59,10 +59,20 @@ def test_init_doctor_sql_search_status_and_export() -> None:
 
         _seed_demo_rows(db_path)
 
-        code, payload = _run_cli(["--json", "--db", str(db_path), "sql", "--query", "SELECT provider_name_snapshot, practice_name_snapshot FROM provider_practice_records"])
+        code, payload = _run_cli(["--json", "--db", str(db_path), "sql", "--query", "SELECT provider_name_snapshot, practice_name_snapshot FROM provider_practice_records;"])
         assert code == 0
         assert payload["data"]["row_count"] == 1
         assert payload["data"]["rows"][0]["provider_name_snapshot"] == "Jane Smith"
+
+        code, payload = _run_cli(["--json", "--db", str(db_path), "sql", "--query", "PRAGMA table_info(provider_practice_records)"])
+        assert code == 0
+        assert payload["data"]["row_count"] > 0
+        assert any(row["name"] == "record_id" for row in payload["data"]["rows"])
+
+        code, payload = _run_cli(["--json", "--db", str(db_path), "sql", "--query", "SELECT created_at FROM review_queue LIMIT 1;"])
+        assert code == 0
+        assert payload["data"]["row_count"] == 1
+        assert payload["data"]["rows"][0]["created_at"] == "2026-03-09T00:00:00Z"
 
         code, payload = _run_cli(["--json", "--db", str(db_path), "search", "Jane"])
         assert code == 0

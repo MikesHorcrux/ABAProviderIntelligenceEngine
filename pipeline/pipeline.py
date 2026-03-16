@@ -17,13 +17,15 @@ from pipeline.stages.qa import run_qa
 from pipeline.stages.resolve import resolve_extracted_records
 from pipeline.stages.score import run_score
 from pipeline.utils import make_pk, normalize_url, utcnow_iso
+from runtime_context import RuntimePaths, default_runtime_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = ROOT / "data" / "provider_intel_v1.db"
+DEFAULT_RUNTIME_PATHS = default_runtime_paths()
+DB_PATH = DEFAULT_RUNTIME_PATHS.db_path
 SCHEMA_PATH = ROOT / "db" / "schema.sql"
-OUT_DIR = ROOT / "out"
-MANIFEST_PATH = ROOT / "data" / "state" / "last_run_manifest.json"
+OUT_DIR = DEFAULT_RUNTIME_PATHS.out_root
+MANIFEST_PATH = DEFAULT_RUNTIME_PATHS.manifest_path
 
 
 class PipelineRunner:
@@ -36,7 +38,9 @@ class PipelineRunner:
         db_timeout_ms: int | None = None,
         config_overrides: dict[str, Any] | None = None,
         crawl_mode: str = "full",
+        runtime_paths: RuntimePaths | None = None,
     ):
+        self.runtime_paths = runtime_paths or DEFAULT_RUNTIME_PATHS
         self.db_path = Path(db_path)
         self.max_pages = max_pages
         self.db_timeout_ms = int(db_timeout_ms) if db_timeout_ms is not None else None
@@ -301,10 +305,11 @@ class PipelineRunner:
 
     def run_export(self, limit: int = 100) -> dict[str, object]:
         con = connect_db(self.db_path, SCHEMA_PATH, timeout_ms=self.db_timeout_ms)
-        result = export_provider_intel(con, OUT_DIR, self.job_id, limit=limit)
+        result = export_provider_intel(con, self.runtime_paths.out_root, self.job_id, limit=limit)
         con.close()
         return result
 
     def _write_last_run_manifest(self, payload: dict[str, object]) -> None:
-        MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        MANIFEST_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        manifest_path = self.runtime_paths.manifest_path
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

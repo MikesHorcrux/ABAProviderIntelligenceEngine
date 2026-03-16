@@ -13,11 +13,13 @@ from jobs.ingest_sources import assert_schema_layout, assert_schema_migration, i
 from pipeline.config import DEFAULT_CONFIG_PATH, CrawlConfig, load_crawl_config
 from pipeline.db import connect_db, normalized_db_timeout_ms, sqlite_timeout_seconds
 from pipeline.run_state import ensure_run_state_dir
+from runtime_context import RuntimePaths, default_runtime_paths, ensure_runtime_dirs
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT_DIR = ROOT / "out" / "provider_intel"
-STATE_DIR = ROOT / "data" / "state"
+DEFAULT_RUNTIME_PATHS = default_runtime_paths()
+OUT_DIR = DEFAULT_RUNTIME_PATHS.provider_out_dir
+STATE_DIR = DEFAULT_RUNTIME_PATHS.state_dir
 MIN_FREE_BYTES = 128 * 1024 * 1024
 
 
@@ -27,7 +29,6 @@ def resolve_config_path(cli_value: str | None) -> Path:
     env_value = (
         os.environ.get("PROVIDER_INTEL_CONFIG")
         or os.environ.get("PROVIDER_INTEL_CRAWLER_CONFIG")
-        or os.environ.get("CANNARADAR_CRAWLER_CONFIG")
     )
     if env_value:
         return Path(env_value).expanduser().resolve()
@@ -44,11 +45,19 @@ def check_item(check_id: str, status: str, summary: str, *, details: dict[str, A
     }
 
 
-def run_doctor(*, db_path: str, config_path: str | None, run_state_dir: str | None, db_timeout_ms: int | None = None) -> dict[str, Any]:
+def run_doctor(
+    *,
+    db_path: str,
+    config_path: str | None,
+    run_state_dir: str | None,
+    db_timeout_ms: int | None = None,
+    runtime_paths: RuntimePaths | None = None,
+) -> dict[str, Any]:
     resolved_config = resolve_config_path(config_path)
     effective_timeout_ms = normalized_db_timeout_ms(db_timeout_ms)
     checks: list[dict[str, Any]] = []
     cfg: CrawlConfig | None = None
+    paths = runtime_paths or DEFAULT_RUNTIME_PATHS
 
     checks.append(
         check_item(
@@ -100,9 +109,9 @@ def run_doctor(*, db_path: str, config_path: str | None, run_state_dir: str | No
 
     for label, path in {
         "db_parent": Path(db_path).expanduser().resolve().parent,
-        "out_dir": OUT_DIR,
-        "state_dir": STATE_DIR,
-        "run_state_dir": ensure_run_state_dir(run_state_dir),
+        "out_dir": paths.provider_out_dir,
+        "state_dir": paths.state_dir,
+        "run_state_dir": ensure_run_state_dir(run_state_dir or str(paths.checkpoint_dir)),
     }.items():
         try:
             path.mkdir(parents=True, exist_ok=True)
@@ -231,14 +240,21 @@ def _config_requires_provider_rewrite(path: Path) -> bool:
     return not seed_file.endswith("seed_pack.json")
 
 
-def run_init(*, db_path: str, config_path: str | None, run_state_dir: str | None, db_timeout_ms: int | None = None) -> dict[str, Any]:
-    resolved_config = resolve_config_path(config_path)
+def run_init(
+    *,
+    db_path: str,
+    config_path: str | None,
+    run_state_dir: str | None,
+    db_timeout_ms: int | None = None,
+    runtime_paths: RuntimePaths | None = None,
+) -> dict[str, Any]:
+    paths = runtime_paths or DEFAULT_RUNTIME_PATHS
+    resolved_config = Path(config_path).expanduser().resolve() if config_path else paths.config_path
     resolved_db = Path(db_path).expanduser().resolve()
     effective_timeout_ms = normalized_db_timeout_ms(db_timeout_ms)
+    ensure_runtime_dirs(paths)
     resolved_db.parent.mkdir(parents=True, exist_ok=True)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    ensure_run_state_dir(run_state_dir)
+    ensure_run_state_dir(run_state_dir or str(paths.checkpoint_dir))
 
     if _config_requires_provider_rewrite(resolved_config):
         resolved_config.write_text(json.dumps(default_config_payload(), indent=2), encoding="utf-8")
@@ -256,15 +272,16 @@ def run_init(*, db_path: str, config_path: str | None, run_state_dir: str | None
     doctor = run_doctor(
         db_path=str(resolved_db),
         config_path=str(resolved_config),
-        run_state_dir=run_state_dir,
+        run_state_dir=run_state_dir or str(paths.checkpoint_dir),
         db_timeout_ms=effective_timeout_ms,
+        runtime_paths=paths,
     )
     return {
         "ok": doctor["ok"],
         "db_path": str(resolved_db),
         "config_path": str(resolved_config),
         "fetch_policies_path": str(resolved_policy),
-        "run_state_dir": str(ensure_run_state_dir(run_state_dir)),
+        "run_state_dir": str(ensure_run_state_dir(run_state_dir or str(paths.checkpoint_dir))),
         "doctor": doctor,
         "next_steps": [
             "provider_intel_cli.py doctor --json",

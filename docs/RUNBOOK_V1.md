@@ -17,6 +17,15 @@ python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
 python3.11 provider_intel_cli.py status --json
 ```
 
+Tenant-scoped fast path:
+
+```bash
+python3.11 provider_intel_cli.py --json --tenant acme init
+python3.11 provider_intel_cli.py --json --tenant acme doctor
+python3.11 provider_intel_cli.py --json --tenant acme sync --max 10 --limit 25
+python3.11 provider_intel_cli.py --json --tenant acme status
+```
+
 Recovery path:
 
 ```bash

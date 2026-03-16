@@ -54,6 +54,15 @@ class CrawlConfig:
     agent_research_min_score: int = 48
     agent_research_paths: list[str] = field(
         default_factory=lambda: [
+            "/search",
+            "/directory",
+            "/find-a-provider",
+            "/find-a-doctor",
+            "/provider-directory",
+            "/verify-a-license",
+            "/license-verification",
+            "/license-lookup",
+            "/physician-search",
             "/about",
             "/providers",
             "/team",
@@ -110,7 +119,7 @@ class CrawlConfig:
 
     def merged_denylist(self) -> set[str]:
         values = list(self.denylist)
-        env_denylist = _env_value("PROVIDER_INTEL_DENYLIST", "CANNARADAR_DENYLIST")
+        env_denylist = _env_value("PROVIDER_INTEL_DENYLIST")
         if env_denylist:
             values.extend([x.strip() for x in env_denylist.split(",")])
         return {str(v).strip().lower().lstrip(".") for v in values if str(v).strip()}
@@ -163,36 +172,30 @@ def load_crawl_config(path: str | Path | None = None) -> CrawlConfig:
     defaults = CrawlConfig()
     cfg_path = Path(
         path
-        or _env_value("PROVIDER_INTEL_CONFIG", "PROVIDER_INTEL_CRAWLER_CONFIG", "CANNARADAR_CRAWLER_CONFIG")
+        or _env_value("PROVIDER_INTEL_CONFIG", "PROVIDER_INTEL_CRAWLER_CONFIG")
         or DEFAULT_CONFIG_PATH
     ).resolve()
-    default_seed = _env_value("PROVIDER_INTEL_SEED_FILE", "CANNARADAR_SEED_FILE") or defaults.seed_file
-    discovery_seed = _env_value("PROVIDER_INTEL_DISCOVERY_FILE", "CANNARADAR_DISCOVERY_FILE") or defaults.discovery_seed_file
-    seed_failure_streak_limit = _env_value("PROVIDER_INTEL_SEED_FAILURE_STREAK_LIMIT", "CANNARADAR_SEED_FAILURE_STREAK_LIMIT")
-    seed_backoff_hours = _env_value("PROVIDER_INTEL_SEED_BACKOFF_HOURS", "CANNARADAR_SEED_BACKOFF_HOURS")
-    weekly_new_lead_target = _env_value("PROVIDER_INTEL_WEEKLY_NEW_LEAD_TARGET", "CANNARADAR_WEEKLY_NEW_LEAD_TARGET")
-    growth_window_days = _env_value("PROVIDER_INTEL_GROWTH_WINDOW_DAYS", "CANNARADAR_GROWTH_WINDOW_DAYS")
-    enforce_growth_governor = _env_value("PROVIDER_INTEL_ENFORCE_GROWTH_GOVERNOR", "CANNARADAR_ENFORCE_GROWTH_GOVERNOR")
-    require_fetch_success_gate = _env_value("PROVIDER_INTEL_REQUIRE_FETCH_SUCCESS_GATE", "CANNARADAR_REQUIRE_FETCH_SUCCESS_GATE")
-    require_net_new_gate = _env_value("PROVIDER_INTEL_REQUIRE_NET_NEW_GATE", "CANNARADAR_REQUIRE_NET_NEW_GATE")
-    fail_on_zero_new_leads = _env_value("PROVIDER_INTEL_FAIL_ON_ZERO_NEW_LEADS", "CANNARADAR_FAIL_ON_ZERO_NEW_LEADS")
-    output_stale_hours = _env_value("PROVIDER_INTEL_OUTPUT_STALE_HOURS", "CANNARADAR_OUTPUT_STALE_HOURS")
-    agent_research_enabled = _env_value("PROVIDER_INTEL_AGENT_RESEARCH", "CANNARADAR_AGENT_RESEARCH")
-    agent_research_limit = _env_value("PROVIDER_INTEL_AGENT_RESEARCH_LIMIT", "CANNARADAR_AGENT_RESEARCH_LIMIT")
-    agent_research_min_score = _env_value("PROVIDER_INTEL_AGENT_RESEARCH_MIN_SCORE", "CANNARADAR_AGENT_RESEARCH_MIN_SCORE")
-    retry_base_delay_seconds = _env_value("PROVIDER_INTEL_RETRY_BASE_DELAY_SECONDS", "CANNARADAR_RETRY_BASE_DELAY_SECONDS")
-    retry_factor = _env_value("PROVIDER_INTEL_RETRY_FACTOR", "CANNARADAR_RETRY_FACTOR")
-    crawlee_headless = _env_value("PROVIDER_INTEL_CRAWLEE_HEADLESS", "CANNARADAR_CRAWLEE_HEADLESS")
-    crawlee_proxy_urls = _env_value("PROVIDER_INTEL_CRAWLEE_PROXY_URLS", "CANNARADAR_CRAWLEE_PROXY_URLS")
-    crawlee_max_browser_pages = _env_value(
-        "PROVIDER_INTEL_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN",
-        "CANNARADAR_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN",
-    )
-    crawlee_browser_isolation = _env_value("PROVIDER_INTEL_CRAWLEE_BROWSER_ISOLATION", "CANNARADAR_CRAWLEE_BROWSER_ISOLATION")
-    crawlee_domain_policies_file = _env_value(
-        "PROVIDER_INTEL_CRAWLEE_DOMAIN_POLICIES_FILE",
-        "CANNARADAR_CRAWLEE_DOMAIN_POLICIES_FILE",
-    )
+    default_seed = _env_value("PROVIDER_INTEL_SEED_FILE") or defaults.seed_file
+    discovery_seed = _env_value("PROVIDER_INTEL_DISCOVERY_FILE") or defaults.discovery_seed_file
+    seed_failure_streak_limit = _env_value("PROVIDER_INTEL_SEED_FAILURE_STREAK_LIMIT")
+    seed_backoff_hours = _env_value("PROVIDER_INTEL_SEED_BACKOFF_HOURS")
+    weekly_new_lead_target = _env_value("PROVIDER_INTEL_WEEKLY_NEW_LEAD_TARGET")
+    growth_window_days = _env_value("PROVIDER_INTEL_GROWTH_WINDOW_DAYS")
+    enforce_growth_governor = _env_value("PROVIDER_INTEL_ENFORCE_GROWTH_GOVERNOR")
+    require_fetch_success_gate = _env_value("PROVIDER_INTEL_REQUIRE_FETCH_SUCCESS_GATE")
+    require_net_new_gate = _env_value("PROVIDER_INTEL_REQUIRE_NET_NEW_GATE")
+    fail_on_zero_new_leads = _env_value("PROVIDER_INTEL_FAIL_ON_ZERO_NEW_LEADS")
+    output_stale_hours = _env_value("PROVIDER_INTEL_OUTPUT_STALE_HOURS")
+    agent_research_enabled = _env_value("PROVIDER_INTEL_AGENT_RESEARCH")
+    agent_research_limit = _env_value("PROVIDER_INTEL_AGENT_RESEARCH_LIMIT")
+    agent_research_min_score = _env_value("PROVIDER_INTEL_AGENT_RESEARCH_MIN_SCORE")
+    retry_base_delay_seconds = _env_value("PROVIDER_INTEL_RETRY_BASE_DELAY_SECONDS")
+    retry_factor = _env_value("PROVIDER_INTEL_RETRY_FACTOR")
+    crawlee_headless = _env_value("PROVIDER_INTEL_CRAWLEE_HEADLESS")
+    crawlee_proxy_urls = _env_value("PROVIDER_INTEL_CRAWLEE_PROXY_URLS")
+    crawlee_max_browser_pages = _env_value("PROVIDER_INTEL_CRAWLEE_MAX_BROWSER_PAGES_PER_DOMAIN")
+    crawlee_browser_isolation = _env_value("PROVIDER_INTEL_CRAWLEE_BROWSER_ISOLATION")
+    crawlee_domain_policies_file = _env_value("PROVIDER_INTEL_CRAWLEE_DOMAIN_POLICIES_FILE")
 
     if not cfg_path.exists():
         return CrawlConfig(

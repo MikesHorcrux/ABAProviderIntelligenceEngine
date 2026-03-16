@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -9,13 +10,15 @@ from cli.errors import ConfigError, DataValidationError
 from pipeline.db import normalized_db_timeout_ms, sqlite_timeout_seconds
 from pipeline.run_control import load_run_control, summarize_run_control
 from pipeline.run_state import latest_run_state, load_run_state
+from runtime_context import RuntimePaths, default_runtime_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_PATH = ROOT / "data" / "state" / "last_run_manifest.json"
-LOCK_PATH = ROOT / "data" / "state" / "run_v4.lock"
-OUT_DIR = ROOT / "out" / "provider_intel"
-READ_ONLY_PREFIXES = ("select", "with")
+DEFAULT_RUNTIME_PATHS = default_runtime_paths()
+MANIFEST_PATH = DEFAULT_RUNTIME_PATHS.manifest_path
+LOCK_PATH = DEFAULT_RUNTIME_PATHS.lock_path
+OUT_DIR = DEFAULT_RUNTIME_PATHS.provider_out_dir
+READ_ONLY_PREFIXES = ("select", "with", "pragma")
 FORBIDDEN_SQL_TERMS = ("insert", "update", "delete", "alter", "drop", "create", "replace", "attach", "detach", "vacuum", "reindex")
 
 PRESET_QUERIES = {
@@ -103,8 +106,16 @@ def _file_snapshot(path: Path) -> dict[str, Any]:
     }
 
 
-def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None, db_timeout_ms: int | None = None) -> dict[str, Any]:
-    manifest = _read_json(MANIFEST_PATH) or {}
+def run_status(
+    *,
+    db_path: str,
+    run_id: str | None,
+    run_state_dir: str | None,
+    db_timeout_ms: int | None = None,
+    runtime_paths: RuntimePaths | None = None,
+) -> dict[str, Any]:
+    paths = runtime_paths or DEFAULT_RUNTIME_PATHS
+    manifest = _read_json(paths.manifest_path) or {}
     checkpoint = None
     if run_id:
         try:
@@ -135,24 +146,31 @@ def run_status(*, db_path: str, run_id: str | None, run_state_dir: str | None, d
     con.close()
 
     latest_records = None
-    if OUT_DIR.exists():
-        candidates = sorted(OUT_DIR.glob("provider_records_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)
+    provider_out_dir = paths.provider_out_dir
+    if provider_out_dir.exists():
+        candidates = sorted(provider_out_dir.glob("provider_records_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)
         latest_records = _file_snapshot(candidates[0]) if candidates else None
+    recent_failures: list[dict[str, Any]] = []
+    last_error = dict((checkpoint or {}).get("last_error") or {})
+    if last_error:
+        recent_failures.append(last_error)
 
     return {
+        "db": _file_snapshot(Path(db_path).expanduser().resolve()),
         "manifest": manifest,
         "checkpoint": checkpoint or {},
         "control": control_summary,
-        "lock": _file_snapshot(LOCK_PATH),
+        "lock": _file_snapshot(paths.lock_path),
         "counts": counts,
+        "recent_failures": recent_failures,
         "outputs": {
-            "records_csv": latest_records or _file_snapshot(OUT_DIR / "missing.csv"),
-            "records_json": _file_snapshot(next(iter(sorted(OUT_DIR.glob("provider_records_*.json"), key=lambda path: path.stat().st_mtime, reverse=True)), OUT_DIR / "missing.json")),
-            "review_queue_csv": _file_snapshot(next(iter(sorted(OUT_DIR.glob("review_queue_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)), OUT_DIR / "missing_review.csv")),
-            "sales_report_csv": _file_snapshot(next(iter(sorted(OUT_DIR.glob("sales_report_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)), OUT_DIR / "missing_sales.csv")),
-            "profiles_dir": _file_snapshot(OUT_DIR / "profiles"),
-            "evidence_dir": _file_snapshot(OUT_DIR / "evidence"),
-            "outreach_dir": _file_snapshot(OUT_DIR / "outreach"),
+            "records_csv": latest_records or _file_snapshot(provider_out_dir / "missing.csv"),
+            "records_json": _file_snapshot(next(iter(sorted(provider_out_dir.glob("provider_records_*.json"), key=lambda path: path.stat().st_mtime, reverse=True)), provider_out_dir / "missing.json")),
+            "review_queue_csv": _file_snapshot(next(iter(sorted(provider_out_dir.glob("review_queue_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)), provider_out_dir / "missing_review.csv")),
+            "sales_report_csv": _file_snapshot(next(iter(sorted(provider_out_dir.glob("sales_report_*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)), provider_out_dir / "missing_sales.csv")),
+            "profiles_dir": _file_snapshot(provider_out_dir / "profiles"),
+            "evidence_dir": _file_snapshot(provider_out_dir / "evidence"),
+            "outreach_dir": _file_snapshot(provider_out_dir / "outreach"),
         },
     }
 
@@ -191,18 +209,21 @@ def run_search(*, db_path: str, query: str | None, preset: str | None, limit: in
 
 
 def run_sql(*, db_path: str, query: str, limit: int, db_timeout_ms: int | None = None) -> dict[str, Any]:
-    normalized = (query or "").strip()
+    normalized = (query or "").strip().rstrip(";").strip()
     if not normalized:
         raise DataValidationError("SQL query is required.")
     lowered = normalized.lower()
     if not lowered.startswith(READ_ONLY_PREFIXES):
-        raise DataValidationError("SQL command must start with SELECT or WITH.")
-    if any(term in lowered for term in FORBIDDEN_SQL_TERMS):
+        raise DataValidationError("SQL command must start with SELECT, WITH, or PRAGMA.")
+    if any(re.search(rf"\b{re.escape(term)}\b", lowered) for term in FORBIDDEN_SQL_TERMS):
         raise DataValidationError("SQL command must be read-only.")
 
     con = _connect_readonly(db_path, db_timeout_ms=db_timeout_ms)
     try:
-        rows = con.execute(f"SELECT * FROM ({normalized}) LIMIT ?", (limit,)).fetchall()
+        if lowered.startswith("pragma"):
+            rows = con.execute(normalized).fetchall()[:limit]
+        else:
+            rows = con.execute(f"SELECT * FROM ({normalized}) LIMIT ?", (limit,)).fetchall()
         data = [dict(row) for row in rows]
         return {"query": normalized, "row_count": len(data), "rows": data}
     finally:
