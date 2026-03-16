@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from contextlib import contextmanager
@@ -45,7 +46,7 @@ class ToolRegistry:
             ToolDefinition("doctor", "Validate the tenant runtime and environment.", self._schema({"reason": reason_prop}, required=["reason"])),
             ToolDefinition(
                 "sync",
-                "Run the full deterministic provider-intel pipeline for this tenant.",
+                "Run a bounded refresh provider-intel pipeline for this tenant.",
                 self._schema(
                     {
                         "reason": reason_prop,
@@ -168,12 +169,50 @@ class ToolRegistry:
 
     @staticmethod
     def _schema(properties: dict[str, Any], *, required: list[str]) -> dict[str, Any]:
+        normalized_properties = {
+            key: ToolRegistry._normalize_property(value, nullable=key not in required)
+            for key, value in properties.items()
+        }
         return {
             "type": "object",
-            "properties": properties,
-            "required": required,
+            "properties": normalized_properties,
+            "required": list(normalized_properties.keys()),
             "additionalProperties": False,
         }
+
+    @staticmethod
+    def _normalize_property(schema: dict[str, Any], *, nullable: bool) -> dict[str, Any]:
+        normalized = deepcopy(schema)
+        prop_type = normalized.get("type")
+        if prop_type == "object":
+            nested_properties = dict(normalized.get("properties") or {})
+            nested_required = list(normalized.get("required") or [])
+            normalized["properties"] = {
+                key: ToolRegistry._normalize_property(value, nullable=key not in nested_required)
+                for key, value in nested_properties.items()
+            }
+            normalized["required"] = list(normalized["properties"].keys())
+            normalized["additionalProperties"] = False
+        elif prop_type == "array" and isinstance(normalized.get("items"), dict):
+            normalized["items"] = ToolRegistry._normalize_property(dict(normalized["items"]), nullable=False)
+
+        if nullable:
+            normalized = ToolRegistry._make_nullable(normalized)
+        return normalized
+
+    @staticmethod
+    def _make_nullable(schema: dict[str, Any]) -> dict[str, Any]:
+        prop_type = schema.get("type")
+        if isinstance(prop_type, list):
+            schema["type"] = list(prop_type) if "null" in prop_type else [*prop_type, "null"]
+        elif isinstance(prop_type, str):
+            schema["type"] = [prop_type, "null"]
+        if "enum" in schema:
+            enum_values = list(schema.get("enum") or [])
+            if None not in enum_values:
+                enum_values.append(None)
+            schema["enum"] = enum_values
+        return schema
 
     def invoke(self, *, session_id: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         self.policy_engine.validate(tool_name, arguments)
@@ -232,9 +271,9 @@ class ToolRegistry:
             args = SimpleNamespace(
                 db=str(paths.db_path),
                 seeds=arguments.get("seeds", "seed_packs/nj/seed_pack.json"),
-                max=arguments.get("max"),
-                crawl_mode=arguments.get("crawl_mode", "full"),
-                limit=arguments.get("limit", 100),
+                max=arguments.get("max", 2),
+                crawl_mode=arguments.get("crawl_mode", "refresh"),
+                limit=arguments.get("limit", 15),
                 crawlee_headless=arguments.get("crawlee_headless"),
                 run_id=arguments.get("run_id"),
                 resume=None,
@@ -250,7 +289,7 @@ class ToolRegistry:
                 seeds="seed_packs/nj/seed_pack.json",
                 max=None,
                 crawl_mode="full",
-                limit=arguments.get("limit", 100),
+                limit=arguments.get("limit", 15),
                 crawlee_headless=arguments.get("crawlee_headless"),
                 run_id=None,
                 resume=arguments.get("resume"),

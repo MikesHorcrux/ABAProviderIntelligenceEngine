@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from pipeline.utils import utcnow_iso
@@ -21,15 +22,25 @@ class AgentOrchestrator:
         session_store: SessionStore,
         memory_store: MemoryStore,
         tool_registry: ToolRegistry,
+        trace_hook: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.config = config
         self.model_adapter = model_adapter
         self.session_store = session_store
         self.memory_store = memory_store
         self.tool_registry = tool_registry
+        self.trace_hook = trace_hook
 
     def run(self, goal: str, tenant_context: TenantContext, session_id: str | None = None) -> dict[str, Any]:
         session = self._ensure_session(goal=goal, tenant_id=str(tenant_context.tenant_id or ""), session_id=session_id)
+        self._emit_trace(
+            {
+                "type": "session_started",
+                "tenant_id": tenant_context.tenant_id,
+                "session_id": session["session_id"],
+                "goal": goal,
+            }
+        )
         self.session_store.append_turn(session["session_id"], role="user", agent_name="SupervisorAgent", content=goal, metadata={"at": utcnow_iso()})
         before_events = len(self.session_store.list_tool_events(session["session_id"]))
         try:
@@ -70,7 +81,7 @@ class AgentOrchestrator:
                 unresolved_risks=unresolved_risks,
                 recommended_next_actions=next_actions,
             )
-            return {
+            result = {
                 "tenant_id": tenant_context.tenant_id,
                 "session_id": updated_session["session_id"],
                 "goal": goal,
@@ -82,8 +93,26 @@ class AgentOrchestrator:
                 "memory_updates": snapshot["memory_updates"],
                 "summaries": summary,
             }
-        except Exception:
+            self._emit_trace(
+                {
+                    "type": "session_completed",
+                    "tenant_id": tenant_context.tenant_id,
+                    "session_id": updated_session["session_id"],
+                    "run_ids": snapshot["run_ids"],
+                    "tools_used": snapshot["tools_used"],
+                }
+            )
+            return result
+        except Exception as exc:
             self.session_store.update_session(session["session_id"], status="failed")
+            self._emit_trace(
+                {
+                    "type": "session_failed",
+                    "tenant_id": tenant_context.tenant_id,
+                    "session_id": session["session_id"],
+                    "error": str(exc),
+                }
+            )
             raise
 
     def status(self, session_id: str | None, *, tenant_id: str) -> dict[str, Any]:
@@ -130,6 +159,7 @@ class AgentOrchestrator:
         )
         messages = [ModelMessage(role="user", content=user_context)]
         last_text = ""
+        previous_response_id: str | None = None
         for _ in range(self.config.max_turns):
             response = self.model_adapter.generate(
                 agent_name="RunOpsAgent",
@@ -137,17 +167,46 @@ class AgentOrchestrator:
                 messages=messages,
                 tools=self.tool_registry.definitions(),
                 model=self.config.model,
+                previous_response_id=previous_response_id,
             )
+            if response.response_id:
+                previous_response_id = response.response_id
             if response.text:
                 last_text = response.text
                 self.session_store.append_turn(session_id, role="assistant", agent_name="RunOpsAgent", content=response.text)
+                self._emit_trace(
+                    {
+                        "type": "agent_message",
+                        "agent_name": "RunOpsAgent",
+                        "session_id": session_id,
+                        "text": response.text,
+                    }
+                )
             if not response.tool_calls:
                 break
-            if response.text:
-                messages.append(ModelMessage(role="assistant", content=response.text))
+            next_messages: list[ModelMessage] = []
+            if response.text and not response.response_id:
+                next_messages.append(ModelMessage(role="assistant", content=response.text))
             for call in response.tool_calls:
+                self._emit_trace(
+                    {
+                        "type": "tool_call_requested",
+                        "session_id": session_id,
+                        "tool_name": call.name,
+                        "arguments": call.arguments,
+                    }
+                )
                 result = self.tool_registry.invoke(session_id=session_id, tool_name=call.name, arguments=call.arguments)
-                messages.append(
+                self._emit_trace(
+                    {
+                        "type": "tool_call_completed",
+                        "session_id": session_id,
+                        "tool_name": call.name,
+                        "ok": result.get("ok", False),
+                        "summary": self._summarize_tool_result(result),
+                    }
+                )
+                next_messages.append(
                     ModelMessage(
                         role="tool",
                         type="function_call_output",
@@ -155,6 +214,7 @@ class AgentOrchestrator:
                         content=json.dumps(result, default=str),
                     )
                 )
+            messages = next_messages
         else:
             last_text = (last_text + "\n" if last_text else "") + "RunOpsAgent reached the configured max turn limit."
         return last_text
@@ -166,9 +226,18 @@ class AgentOrchestrator:
             messages=[ModelMessage(role="user", content=context)],
             tools=[],
             model=self.config.model,
+            previous_response_id=None,
         )
         text = response.text.strip() or f"{agent_name} produced no summary."
         self.session_store.append_turn(session_id, role="assistant", agent_name=agent_name, content=text)
+        self._emit_trace(
+            {
+                "type": "agent_message",
+                "agent_name": agent_name,
+                "session_id": session_id,
+                "text": text,
+            }
+        )
         return text
 
     def _build_snapshot(self, session_id: str, *, new_event_offset: int) -> dict[str, Any]:
@@ -184,7 +253,18 @@ class AgentOrchestrator:
             run_id = data.get("run_id")
             if isinstance(run_id, str) and run_id and run_id not in run_ids:
                 run_ids.append(run_id)
-            for key in ("records_csv", "records_json", "review_queue_csv", "sales_report_csv", "profiles_dir", "evidence_dir", "outreach_dir"):
+            for key in (
+                "records_csv",
+                "records_json",
+                "review_queue_csv",
+                "sales_report_csv",
+                "profiles_dir",
+                "evidence_dir",
+                "outreach_dir",
+                "dossiers_dir",
+                "dossiers_csv",
+                "dossiers_json",
+            ):
                 if key in data:
                     exports.append({"tool": event["tool_name"], "key": key, "path": data[key]})
             if event["tool_name"] == "control_apply":
@@ -238,12 +318,51 @@ class AgentOrchestrator:
         ]
         return "\n".join(parts)
 
+    def _emit_trace(self, event: dict[str, Any]) -> None:
+        if self.trace_hook is not None:
+            self.trace_hook(event)
+
+    @staticmethod
+    def _summarize_tool_result(result: dict[str, Any]) -> str:
+        data = dict(result.get("data") or {})
+        payload = dict(data.get("data") or data)
+        if not result.get("ok", False):
+            error = dict(data.get("error") or result.get("error") or {})
+            return str(error.get("message") or "tool failed")
+        if "run_id" in payload:
+            return f"run_id={payload['run_id']}"
+        if "row_count" in payload:
+            return f"row_count={payload['row_count']}"
+        counts = payload.get("counts")
+        if isinstance(counts, dict):
+            records = counts.get("records")
+            review_queue = counts.get("review_queue")
+            contradictions = counts.get("contradictions")
+            parts = []
+            if records is not None:
+                parts.append(f"records={records}")
+            if review_queue is not None:
+                parts.append(f"review_queue={review_queue}")
+            if contradictions is not None:
+                parts.append(f"contradictions={contradictions}")
+            if parts:
+                return ", ".join(parts)
+        export_keys = [key for key in ("records_csv", "records_json", "review_queue_csv", "sales_report_csv") if key in payload]
+        if export_keys:
+            return "exports=" + ",".join(export_keys)
+        if "ok" in payload:
+            return f"ok={payload['ok']}"
+        return "completed"
+
     @staticmethod
     def _run_ops_instructions() -> str:
         return (
             "You are RunOpsAgent for an evidence-first provider intelligence engine. "
             "Use tools to inspect runtime state, run or resume bounded sync loops, diagnose blocked domains, "
-            "triage review lanes, and export approved artifacts. Never claim provider truth without the deterministic runtime."
+            "triage review lanes, inspect exported artifacts, and export approved artifacts. "
+            "Treat sync as a strictly bounded validation loop: refresh mode only, 2 or 3 seeds at a time, and small export limits. "
+            "If a run yields weak or empty output, inspect the run state and exported artifacts before trying another bounded sync. "
+            "Never claim provider truth without the deterministic runtime."
         )
 
     @staticmethod

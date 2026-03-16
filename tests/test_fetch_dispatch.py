@@ -366,6 +366,7 @@ def test_seed_crawl_state_filters_assets_and_honors_manual_controls() -> None:
     metrics = Metrics("fetch-controls")
     logger = build_logger("fetch-controls", "fetch")
     cfg = load_crawl_config("/tmp/provider-intel-fetch-controls-does-not-exist.json")
+    cfg.agent_research_enabled = False
     seed = DiscoverySeed(name="Green Leaf", website="https://greenleaf.com", state="CA", market="CA")
     recorder = SeedRunRecorder(
         con=con,
@@ -411,7 +412,122 @@ def test_seed_crawl_state_filters_assets_and_honors_manual_controls() -> None:
     con.close()
 
 
-def test_seed_initial_requests_skip_synthetic_paths_for_nested_or_browser_required_seeds() -> None:
+def test_discover_seed_research_urls_prefers_seed_path_and_sitemaps() -> None:
+    cfg = load_crawl_config("/tmp/provider-intel-fetch-research-does-not-exist.json")
+    cfg.agent_research_limit = 10
+    seed = DiscoverySeed(
+        name="Nested Seed",
+        website="https://example.com/bme/Pages/default.aspx",
+        state="NJ",
+        market="NJ",
+        source_type="licensing_board",
+    )
+
+    original_fetch = crawlee_backend._fetch_seed_research_document
+    requested: list[str] = []
+
+    def fake_fetch(url: str, *, user_agent: str, timeout_seconds: float) -> tuple[int, str, str]:
+        requested.append(url)
+        if url == "https://example.com/robots.txt":
+            return 200, "text/plain", "User-agent: *\nSitemap: https://example.com/sitemap.xml\n"
+        if url == "https://example.com/sitemap.xml":
+            return 200, "application/xml", "<sitemapindex><sitemap><loc>https://example.com/providers-sitemap.xml</loc></sitemap></sitemapindex>"
+        if url == "https://example.com/providers-sitemap.xml":
+            return (
+                200,
+                "application/xml",
+                (
+                    "<urlset>"
+                    "<url><loc>https://example.com/Verify-a-License</loc></url>"
+                    "<url><loc>https://example.com/provider-directory</loc></url>"
+                    "<url><loc>https://example.com/privacy-policy</loc></url>"
+                    "<url><loc>https://other.example.com/provider-directory</loc></url>"
+                    "</urlset>"
+                ),
+            )
+        return 404, "text/plain", ""
+
+    crawlee_backend._fetch_seed_research_document = fake_fetch
+    try:
+        discovered = crawlee_backend._discover_seed_research_urls(seed, cfg)
+    finally:
+        crawlee_backend._fetch_seed_research_document = original_fetch
+
+    assert any(item.endswith("/bme/verify-a-license") for item in discovered)
+    assert "https://example.com/bme/search" in discovered
+    assert "https://example.com/bme/provider-directory" in discovered
+    assert all("privacy" not in item for item in discovered)
+    assert all("other.example.com" not in item for item in discovered)
+    assert requested[:3] == [
+        "https://example.com/robots.txt",
+        "https://example.com/sitemap.xml",
+        "https://example.com/providers-sitemap.xml",
+    ]
+
+
+def test_discover_seed_research_urls_skips_license_guesses_for_non_board_sources() -> None:
+    cfg = load_crawl_config("/tmp/provider-intel-fetch-research-non-board.json")
+    cfg.agent_research_limit = 10
+    seed = DiscoverySeed(
+        name="Detail Seed",
+        website="https://example.com/centers-clinics/rutgers-center-adult-autism-services-rcaas",
+        state="NJ",
+        market="NJ",
+        source_type="university_directory",
+    )
+
+    original_fetch = crawlee_backend._fetch_seed_research_document
+
+    def fake_fetch(_url: str, *, user_agent: str, timeout_seconds: float) -> tuple[int, str, str]:
+        del user_agent, timeout_seconds
+        return 404, "text/plain", ""
+
+    crawlee_backend._fetch_seed_research_document = fake_fetch
+    try:
+        discovered = crawlee_backend._discover_seed_research_urls(seed, cfg)
+    finally:
+        crawlee_backend._fetch_seed_research_document = original_fetch
+
+    assert "https://example.com/" in discovered
+    assert all("providers" not in item for item in discovered)
+    assert all("search" not in item for item in discovered)
+    assert all("verify-a-license" not in item for item in discovered)
+    assert all("license-lookup" not in item for item in discovered)
+    assert all("license-verification" not in item for item in discovered)
+
+
+def test_discover_seed_research_urls_skips_synthetic_paths_for_browser_directories() -> None:
+    cfg = load_crawl_config("/tmp/provider-intel-fetch-research-browser-directory.json")
+    cfg.agent_research_limit = 10
+    seed = DiscoverySeed(
+        name="Directory Seed",
+        website="https://example.com/us/therapists/nj",
+        state="NJ",
+        market="NJ",
+        source_type="professional_directory",
+        browser_required=True,
+    )
+
+    original_fetch = crawlee_backend._fetch_seed_research_document
+
+    def fake_fetch(_url: str, *, user_agent: str, timeout_seconds: float) -> tuple[int, str, str]:
+        del user_agent, timeout_seconds
+        return 404, "text/plain", ""
+
+    crawlee_backend._fetch_seed_research_document = fake_fetch
+    try:
+        discovered = crawlee_backend._discover_seed_research_urls(seed, cfg)
+    finally:
+        crawlee_backend._fetch_seed_research_document = original_fetch
+
+    assert "https://example.com/" in discovered
+    assert all("providers" not in item for item in discovered)
+    assert all("provider-directory" not in item for item in discovered)
+    assert all("evaluations" not in item for item in discovered)
+    assert all("find-a-provider" not in item for item in discovered)
+
+
+def test_seed_initial_requests_include_discovered_research_urls() -> None:
     con = _connect()
     metrics = Metrics("fetch-initial-requests")
     logger = build_logger("fetch-initial-requests", "fetch")
@@ -420,72 +536,47 @@ def test_seed_initial_requests_skip_synthetic_paths_for_nested_or_browser_requir
     with tempfile.TemporaryDirectory() as td:
         policy = load_domain_policies("/tmp/does-not-exist-fetch-policy.json").default
 
-        nested_seed = DiscoverySeed(
-            name="Nested Seed",
-            website="https://example.com/directory/listing",
-            state="CA",
-            market="CA",
-        )
-        nested_recorder = SeedRunRecorder(
+        seed = DiscoverySeed(name="Nested Seed", website="https://example.com/directory/listing", state="CA", market="CA")
+        recorder = SeedRunRecorder(
             con=con,
-            seed=nested_seed,
+            seed=seed,
             seed_domain="example.com",
-            job_id="job-initial-nested",
+            job_id="job-initial",
             metrics=metrics,
         )
-        nested_recorder.start()
-        nested_state = SeedCrawlState(
+        recorder.start()
+        state = SeedCrawlState(
             con=con,
-            seed=nested_seed,
+            seed=seed,
             cfg=cfg,
             policy=policy,
             metrics=metrics,
             logger=logger,
-            job_id="job-initial-nested",
+            job_id="job-initial",
             denylist=set(),
-            recorder=nested_recorder,
+            recorder=recorder,
             crawl_pages=10,
             total_page_limit=10,
             crawl_depth=2,
             browser_page_limit=3,
             run_state_dir=td,
         )
-        nested_requests = nested_state.seed_initial_requests()
-        assert [item.normalized_url for item in nested_requests] == ["https://example.com/directory/listing"]
 
-        browser_seed = DiscoverySeed(
-            name="Browser Seed",
-            website="https://example.com",
-            state="CA",
-            market="CA",
-            browser_required=True,
-        )
-        browser_recorder = SeedRunRecorder(
-            con=con,
-            seed=browser_seed,
-            seed_domain="example.com",
-            job_id="job-initial-browser",
-            metrics=metrics,
-        )
-        browser_recorder.start()
-        browser_state = SeedCrawlState(
-            con=con,
-            seed=browser_seed,
-            cfg=cfg,
-            policy=policy,
-            metrics=metrics,
-            logger=logger,
-            job_id="job-initial-browser",
-            denylist=set(),
-            recorder=browser_recorder,
-            crawl_pages=10,
-            total_page_limit=10,
-            crawl_depth=2,
-            browser_page_limit=3,
-            run_state_dir=td,
-        )
-        browser_requests = browser_state.seed_initial_requests()
-        assert [item.normalized_url for item in browser_requests] == ["https://example.com"]
+        original_discover = crawlee_backend._discover_seed_research_urls
+        crawlee_backend._discover_seed_research_urls = lambda *_args, **_kwargs: [
+            "https://example.com/",
+            "https://example.com/provider-directory",
+        ]
+        try:
+            requests = state.seed_initial_requests()
+        finally:
+            crawlee_backend._discover_seed_research_urls = original_discover
+
+        assert [item.normalized_url for item in requests] == [
+            "https://example.com/directory/listing",
+            "https://example.com/",
+            "https://example.com/provider-directory",
+        ]
 
     con.close()
 
@@ -499,6 +590,7 @@ def test_browser_required_seed_runs_in_browser_mode_without_http_stage() -> None
         metrics = Metrics("fetch-browser-required")
         logger = build_logger("fetch-browser-required", "fetch")
         cfg = load_crawl_config("/tmp/provider-intel-fetch-browser-required.json")
+        cfg.agent_research_enabled = False
         seed = DiscoverySeed(
             name="Browser Required",
             website="https://browser-required.example",
@@ -560,6 +652,7 @@ def test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns() -> None:
     metrics = Metrics("fetch-healing")
     logger = build_logger("fetch-healing", "fetch")
     cfg = load_crawl_config("/tmp/provider-intel-fetch-healing-does-not-exist.json")
+    cfg.agent_research_enabled = False
     seed = DiscoverySeed(name="Healing Seed", website="https://healing.example", state="CA", market="CA")
     recorder = SeedRunRecorder(
         con=con,
@@ -617,6 +710,7 @@ def test_run_fetch_contains_browser_driver_failure_to_one_seed() -> None:
         metrics = Metrics("fetch-runtime-failure")
         logger = build_logger("fetch-runtime-failure", "fetch")
         cfg = load_crawl_config("/tmp/provider-intel-fetch-runtime-failure.json")
+        cfg.agent_research_enabled = True
         cfg.crawlee_browser_isolation = "subprocess"
         seeds = [
             DiscoverySeed(name="Crash Seed", website="https://fail.example", state="CA", market="CA"),
@@ -625,6 +719,7 @@ def test_run_fetch_contains_browser_driver_failure_to_one_seed() -> None:
 
         original_http = crawlee_backend._run_http_crawl
         original_browser_worker = crawlee_backend._run_browser_worker_subprocess
+        original_discover = crawlee_backend._discover_seed_research_urls
 
         async def fake_run_http_crawl(state, initial_requests):
             target_url = initial_requests[0].normalized_url
@@ -648,6 +743,7 @@ def test_run_fetch_contains_browser_driver_failure_to_one_seed() -> None:
 
         crawlee_backend._run_http_crawl = fake_run_http_crawl
         crawlee_backend._run_browser_worker_subprocess = fake_browser_worker_subprocess
+        crawlee_backend._discover_seed_research_urls = lambda seed, cfg: [f"{seed.website}/provider-directory"]
         try:
             results = crawlee_backend.run_fetch(
                 con,
@@ -664,6 +760,7 @@ def test_run_fetch_contains_browser_driver_failure_to_one_seed() -> None:
         finally:
             crawlee_backend._run_http_crawl = original_http
             crawlee_backend._run_browser_worker_subprocess = original_browser_worker
+            crawlee_backend._discover_seed_research_urls = original_discover
 
         statuses = {
             row["seed_domain"]: row["status"]
@@ -702,6 +799,10 @@ def main() -> None:
     test_pipeline_runner_refresh_mode_uses_monitor_fetch_limits()
     test_pipeline_runner_applies_headless_override()
     test_seed_crawl_state_filters_assets_and_honors_manual_controls()
+    test_discover_seed_research_urls_prefers_seed_path_and_sitemaps()
+    test_discover_seed_research_urls_skips_license_guesses_for_non_board_sources()
+    test_discover_seed_research_urls_skips_synthetic_paths_for_browser_directories()
+    test_seed_initial_requests_include_discovered_research_urls()
     test_seed_crawl_state_auto_suppresses_prefix_and_stops_on_dns()
     test_run_fetch_contains_browser_driver_failure_to_one_seed()
     print("test_fetch_dispatch: ok")

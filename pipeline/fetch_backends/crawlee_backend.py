@@ -4,6 +4,7 @@ import asyncio
 import atexit
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -11,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from urllib import error, request
 from urllib.parse import urlparse
 
 import sqlite3
@@ -109,6 +111,80 @@ STATIC_FILE_EXTENSIONS = {
     ".mp3",
     ".webm",
 }
+SITEMAP_PATHS = (
+    "/sitemap.xml",
+    "/sitemap_index.xml",
+    "/sitemap-index.xml",
+)
+RESEARCH_PATH_BONUS = 64
+ROOT_PAGE_BONUS = 52
+SITEMAP_FETCH_LIMIT = 4
+URLSET_LOC_RE = re.compile(r"<loc>\s*([^<]+?)\s*</loc>", re.I)
+POSITIVE_RESEARCH_HINTS = {
+    "provider": 22,
+    "providers": 22,
+    "doctor": 18,
+    "doctors": 18,
+    "therapist": 18,
+    "therapists": 18,
+    "psychologist": 22,
+    "psychologists": 22,
+    "psychiatrist": 22,
+    "directory": 20,
+    "search": 20,
+    "find": 14,
+    "license": 24,
+    "verify": 24,
+    "lookup": 18,
+    "results": 16,
+    "listing": 14,
+    "staff": 14,
+    "team": 14,
+    "evaluation": 18,
+    "evaluations": 18,
+    "assessment": 18,
+    "diagnostic": 18,
+    "autism": 18,
+    "adhd": 18,
+    "telehealth": 10,
+    "contact": 8,
+}
+NEGATIVE_RESEARCH_HINTS = {
+    "privacy": -100,
+    "terms": -100,
+    "career": -90,
+    "careers": -90,
+    "job": -90,
+    "jobs": -90,
+    "news": -72,
+    "blog": -72,
+    "article": -72,
+    "articles": -72,
+    "event": -56,
+    "events": -56,
+    "press": -56,
+    "donate": -64,
+    "foundation": -64,
+}
+GENERIC_PATH_SEGMENTS = {
+    "application",
+    "applications",
+    "default",
+    "default.aspx",
+    "default.html",
+    "index",
+    "index.aspx",
+    "index.html",
+    "page",
+    "pages",
+}
+LICENSE_DISCOVERY_PATHS = {
+    "/verify-a-license",
+    "/license-verification",
+    "/license-lookup",
+    "/physician-search",
+    "/find-a-doctor",
+}
 
 
 def _path_lower(normalized_url: str) -> str:
@@ -130,6 +206,254 @@ def _path_prefix(normalized_url: str) -> str:
     if "." in first:
         return f"/{first}"
     return f"/{first}/"
+
+
+def _site_root_url(url: str) -> str:
+    normalized = normalize_url(url)
+    parsed = urlparse(normalized)
+    if not parsed.scheme or not parsed.netloc:
+        return normalized
+    return normalize_url(f"{parsed.scheme}://{parsed.netloc}/")
+
+
+def _seed_anchor_segments(url: str) -> list[str]:
+    normalized = normalize_url(url)
+    parsed = urlparse(normalized)
+    parts = [part for part in (parsed.path or "/").split("/") if part]
+    if parts and "." in parts[-1]:
+        parts = parts[:-1]
+    while parts and parts[-1].lower() in GENERIC_PATH_SEGMENTS:
+        parts = parts[:-1]
+    return parts
+
+
+def _seed_looks_like_detail_page(seed: DiscoverySeed) -> bool:
+    anchor_segments = _seed_anchor_segments(seed.website)
+    if not anchor_segments:
+        return False
+    leaf = anchor_segments[-1].lower()
+    if any(token in leaf for token in ("provider", "team", "staff", "directory", "search", "license", "lookup", "verify", "location")):
+        return False
+    if seed.source_type in {"hospital_directory", "university_directory", "practice_site", "state_registry"}:
+        return len(leaf) >= 18 or leaf.count("-") >= 2 or len(anchor_segments) >= 2
+    return False
+
+
+def _seed_research_base_urls(seed: DiscoverySeed) -> list[str]:
+    root_url = _site_root_url(seed.website)
+    anchor_segments = _seed_anchor_segments(seed.website)
+    if _seed_looks_like_detail_page(seed) and len(anchor_segments) > 1:
+        anchor_segments = anchor_segments[:-1]
+    bases: list[str] = []
+    seen: set[str] = set()
+
+    def add_base(parts: list[str]) -> None:
+        if not parts:
+            return
+        candidate = normalize_url(f"{root_url.rstrip('/')}/{'/'.join(parts)}/")
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            bases.append(candidate)
+
+    for depth in range(len(anchor_segments), max(len(anchor_segments) - 3, 0), -1):
+        add_base(anchor_segments[:depth])
+    if len(anchor_segments) == 1:
+        add_base(anchor_segments)
+    return bases
+
+
+def _agent_research_paths_for_seed(seed: DiscoverySeed, cfg: CrawlConfig) -> list[str]:
+    if seed.source_type != "licensing_board" and _seed_looks_like_detail_page(seed):
+        return []
+    if seed.browser_required and seed.source_type in {"insurer_directory", "professional_directory"}:
+        return []
+    paths: list[str] = []
+    seen: set[str] = set()
+    for raw in [*cfg.agent_research_paths, *cfg.extra_paths]:
+        path = str(raw).strip().lower()
+        if not path or not path.startswith("/") or path in seen:
+            continue
+        if seed.source_type != "licensing_board" and path in LICENSE_DISCOVERY_PATHS:
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
+
+
+def _seed_path_proximity_bonus(url: str, seed: DiscoverySeed) -> int:
+    candidate_segments = _seed_anchor_segments(url)
+    seed_segments = _seed_anchor_segments(seed.website)
+    if not candidate_segments or not seed_segments:
+        return 0
+    shared = 0
+    for candidate_part, seed_part in zip(candidate_segments, seed_segments):
+        if candidate_part.lower() != seed_part.lower():
+            break
+        shared += 1
+    if shared == 0:
+        return 0
+    bonus = shared * 18
+    if candidate_segments[: len(seed_segments)] == seed_segments[: len(candidate_segments)]:
+        bonus += 12
+    return bonus
+
+
+def _fetch_seed_research_document(url: str, *, user_agent: str, timeout_seconds: float) -> tuple[int, str, str]:
+    req = request.Request(url, headers={"User-Agent": user_agent})
+    timeout = max(2.0, min(float(timeout_seconds or 8.0), 15.0))
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            payload = response.read().decode("utf-8", errors="ignore")
+            return int(getattr(response, "status", 200) or 200), str(response.headers.get("Content-Type") or ""), payload
+    except error.HTTPError as exc:
+        try:
+            payload = exc.read().decode("utf-8", errors="ignore")
+        except Exception:
+            payload = ""
+        return int(exc.code or 0), str(exc.headers.get("Content-Type") or ""), payload
+    except Exception:
+        return 0, "", ""
+
+
+def _parse_robots_sitemaps(text: str) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if not stripped or ":" not in stripped:
+            continue
+        label, value = stripped.split(":", 1)
+        if label.strip().lower() != "sitemap":
+            continue
+        candidate = normalize_url(value.strip())
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        urls.append(candidate)
+    return urls
+
+
+def _parse_sitemap_urls(text: str) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for raw in URLSET_LOC_RE.findall(text or ""):
+        candidate = normalize_url(raw)
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        urls.append(candidate)
+    return urls
+
+
+def _score_seed_research_candidate(url: str, *, seed: DiscoverySeed, cfg: CrawlConfig) -> int:
+    normalized = normalize_url(url)
+    if not normalized or not same_domain(seed.website, normalized):
+        return -1000
+    parsed = urlparse(normalized)
+    path = (parsed.path or "/").lower()
+    score = 0
+    if path in {"", "/"}:
+        score += ROOT_PAGE_BONUS
+    score += _seed_path_proximity_bonus(normalized, seed)
+    configured_paths = {
+        str(item).strip().lower()
+        for item in _agent_research_paths_for_seed(seed, cfg)
+        if str(item).strip()
+    }
+    if any(path == configured_path or path.endswith(configured_path) for configured_path in configured_paths):
+        score += RESEARCH_PATH_BONUS
+    for token, weight in POSITIVE_RESEARCH_HINTS.items():
+        if token in path:
+            score += weight
+    for token, weight in NEGATIVE_RESEARCH_HINTS.items():
+        if token in path:
+            score += weight
+    if seed.source_type == "licensing_board":
+        if any(token in path for token in ("license", "verify", "lookup", "search", "results", "physician", "psychologist")):
+            score += 18
+    if path.endswith(".xml"):
+        score -= 80
+    return score
+
+
+def _discover_seed_research_urls(seed: DiscoverySeed, cfg: CrawlConfig) -> list[str]:
+    if not cfg.agent_research_enabled:
+        return []
+
+    root_url = _site_root_url(seed.website)
+    candidate_urls: list[str] = []
+    seen_candidates: set[str] = set()
+
+    def add_candidate(url: str) -> None:
+        normalized = normalize_url(url)
+        if not normalized or normalized in seen_candidates or not same_domain(seed.website, normalized):
+            return
+        seen_candidates.add(normalized)
+        candidate_urls.append(normalized)
+
+    if normalize_url(root_url) != normalize_url(seed.website):
+        add_candidate(root_url)
+
+    research_bases = _seed_research_base_urls(seed)
+    research_paths = _agent_research_paths_for_seed(seed, cfg)
+    if not research_bases:
+        research_bases = [root_url]
+    for base_url in research_bases:
+        if normalize_url(base_url) != normalize_url(seed.website):
+            add_candidate(base_url)
+        for path in research_paths:
+            add_candidate(f"{base_url.rstrip('/')}{path}")
+
+    sitemap_queue: list[str] = []
+    sitemap_seen: set[str] = set()
+    for sitemap_url in _parse_robots_sitemaps(
+        _fetch_seed_research_document(f"{root_url.rstrip('/')}/robots.txt", user_agent=cfg.user_agent, timeout_seconds=cfg.timeout_seconds)[2]
+    ):
+        if same_domain(seed.website, sitemap_url) and sitemap_url not in sitemap_seen:
+            sitemap_seen.add(sitemap_url)
+            sitemap_queue.append(sitemap_url)
+    if not sitemap_queue:
+        for path in SITEMAP_PATHS:
+            sitemap_url = normalize_url(f"{root_url.rstrip('/')}{path}")
+            if sitemap_url not in sitemap_seen:
+                sitemap_seen.add(sitemap_url)
+                sitemap_queue.append(sitemap_url)
+
+    fetched_sitemaps = 0
+    while sitemap_queue and fetched_sitemaps < SITEMAP_FETCH_LIMIT:
+        sitemap_url = sitemap_queue.pop(0)
+        status_code, _, body = _fetch_seed_research_document(
+            sitemap_url,
+            user_agent=cfg.user_agent,
+            timeout_seconds=cfg.timeout_seconds,
+        )
+        if status_code != 200 or not body:
+            continue
+        fetched_sitemaps += 1
+        for discovered_url in _parse_sitemap_urls(body):
+            if not same_domain(seed.website, discovered_url):
+                continue
+            path = (urlparse(discovered_url).path or "").lower()
+            if path.endswith(".xml") and "sitemap" in path and discovered_url not in sitemap_seen and len(sitemap_seen) < SITEMAP_FETCH_LIMIT * 3:
+                sitemap_seen.add(discovered_url)
+                sitemap_queue.append(discovered_url)
+                continue
+            add_candidate(discovered_url)
+
+    ranked = sorted(
+        (
+            candidate
+            for candidate in candidate_urls
+            if _score_seed_research_candidate(candidate, seed=seed, cfg=cfg) >= int(cfg.agent_research_min_score or 0)
+        ),
+        key=lambda item: (
+            -_score_seed_research_candidate(item, seed=seed, cfg=cfg),
+            len(urlparse(item).path or "/"),
+            item,
+        ),
+    )
+    limit = max(1, int(cfg.agent_research_limit or 1))
+    return ranked[:limit]
 
 
 def _is_valid_seed_domain(seed: DiscoverySeed) -> tuple[bool, str]:
@@ -549,15 +873,8 @@ class SeedCrawlState:
         seed_url = self.queue_url(self.seed.website, 0)
         if seed_url is not None:
             items.append(seed_url)
-
-        parsed_seed = urlparse(self.seed.website)
-        seed_path = (parsed_seed.path or "/").strip() or "/"
-        should_seed_extra_paths = not self.seed.browser_required and seed_path in {"", "/"}
-        if not should_seed_extra_paths:
-            return items
-
-        for path in self.cfg.extra_paths:
-            candidate = normalize_url(f"{self.seed.website.rstrip('/')}{path}")
+        research_candidates = _discover_seed_research_urls(self.seed, self.cfg)
+        for candidate in research_candidates:
             item = self.queue_url(candidate, 0)
             if item is not None:
                 items.append(item)
@@ -567,7 +884,19 @@ class SeedCrawlState:
         if depth >= self.crawl_depth or not self.discovery_enabled or self.stop_requested:
             return []
         queued: list[QueueItem] = []
-        for link in extract_links(base_url, html):
+        links = list(extract_links(base_url, html))
+        links.sort(
+            key=lambda raw: (
+                -_score_seed_research_candidate(
+                    normalize_url(raw) if raw.startswith(("http://", "https://")) else resolve_link(base_url, raw),
+                    seed=self.seed,
+                    cfg=self.cfg,
+                ),
+                len(raw),
+                raw,
+            )
+        )
+        for link in links:
             if link.startswith("http://") or link.startswith("https://"):
                 next_url = normalize_url(link)
             else:

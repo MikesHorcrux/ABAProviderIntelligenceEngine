@@ -35,6 +35,65 @@ def _seed_record(con: sqlite3.Connection) -> None:
     con.commit()
 
 
+def _seed_review_only_account(con: sqlite3.Connection) -> None:
+    now = "2026-03-09T00:00:00Z"
+    pages = (
+        (
+            "src_eval",
+            "ext_eval",
+            "rev_eval",
+            "https://rwjbh.org/treatment-care/pediatrics/conditions-treatments/pediatric-autism/developmental-evaluations",
+            "Development Evaluations | RWJBarnabas Health",
+        ),
+        (
+            "src_assessment",
+            "ext_assessment",
+            "rev_assessment",
+            "https://rwjbh.org/treatment-care/pediatrics/conditions-treatments/pediatric-autism/assessment-evaluation",
+            "Assessment & Evaluation | RWJBarnabas Health",
+        ),
+        (
+            "src_faq",
+            "ext_faq",
+            "rev_faq",
+            "https://rwjbh.org/treatment-care/pediatrics/conditions-treatments/pediatric-autism/frequently-asked-questions",
+            "Frequently Asked Questions - New Jersey Health System",
+        ),
+    )
+    for source_document_id, extracted_id, review_id, source_url, practice_name in pages:
+        con.execute(
+            """
+            INSERT INTO source_documents
+            (source_document_id, crawl_job_pk, source_url, normalized_url, source_tier, source_type, extraction_profile,
+             status_code, content_hash, content, snapshot_path, fetched_at, created_at)
+            VALUES (?, 'job_1', ?, ?, 'A', 'hospital_directory', 'hospital', 200, ?, '', '', ?, ?)
+            """,
+            (source_document_id, source_url, source_url, f"hash:{source_document_id}", now, now),
+        )
+        con.execute(
+            """
+            INSERT INTO extracted_records
+            (extracted_id, source_document_id, source_url, source_tier, source_type, extraction_profile, provider_name,
+             credentials, npi, practice_name, intake_url, phone, fax, address_1, city, state, zip, metro, license_state,
+             license_type, license_status, diagnoses_asd, diagnoses_adhd, age_groups_json, telehealth, insurance_notes,
+             waitlist_notes, referral_requirements, evidence_json, created_at)
+            VALUES (?, ?, ?, 'A', 'hospital_directory', 'hospital', '', '', '', ?, 'https://rwjbh.org/request', '(973) 555-0112', '',
+                    '', 'West Orange', 'NJ', '', 'Edison-New Brunswick', 'NJ', 'unknown', 'unknown', 'yes', 'unclear', '["child"]',
+                    'unknown', 'Accepts major plans', '', 'Referral required', '[]', ?)
+            """,
+            (extracted_id, source_document_id, source_url, practice_name, now),
+        )
+        con.execute(
+            """
+            INSERT INTO review_queue
+            (review_id, record_id, review_type, provider_name, practice_name, reason, source_url, evidence_quote, status, created_at)
+            VALUES (?, '', 'missing_provider', '', ?, 'Practice offers evaluations but no named clinician was verified.', ?, '', 'pending', ?)
+            """,
+            (review_id, practice_name, source_url, now),
+        )
+    con.commit()
+
+
 def test_score_qa_and_export_generate_provider_outputs() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -51,27 +110,67 @@ def test_score_qa_and_export_generate_provider_outputs() -> None:
         records_path = Path(str(report["records_csv"]))
         review_path = Path(str(report["review_queue_csv"]))
         sales_path = Path(str(report["sales_report_csv"]))
+        dossiers_path = Path(str(report["dossiers_csv"]))
         assert records_path.exists()
         assert review_path.exists()
         assert sales_path.exists()
+        assert dossiers_path.exists()
         assert Path(str(report["profiles_dir"])) .exists()
         assert Path(str(report["outreach_dir"])).exists()
+        assert Path(str(report["dossiers_dir"])).exists()
         with records_path.open(newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))
         with sales_path.open(newline="", encoding="utf-8") as handle:
             sales_rows = list(csv.DictReader(handle))
+        with dossiers_path.open(newline="", encoding="utf-8") as handle:
+            dossier_rows = list(csv.DictReader(handle))
         assert len(rows) == 1
         assert len(sales_rows) == 1
+        assert len(dossier_rows) == 1
         assert rows[0]["provider_name"] == "Jane Smith"
         assert rows[0]["prescriptive_authority"] == "no"
         assert rows[0]["diagnoses_asd"] == "yes"
         assert rows[0]["diagnoses_adhd"] == "yes"
         assert rows[0]["outreach_ready"] == "1"
         assert sales_rows[0]["target_buyer"] == "clinical director or practice owner"
+        dossier_md = Path(dossier_rows[0]["dossier_markdown"])
+        dossier_profiles_dir = Path(dossier_rows[0]["profiles_dir"])
+        assert dossier_md.exists()
+        assert dossier_profiles_dir.exists()
+        assert any(dossier_profiles_dir.glob("*.md"))
+        dossier_text = dossier_md.read_text(encoding="utf-8")
+        assert "## Company Snapshot" in dossier_text
+        assert "## Decision Network Matrix" in dossier_text
+        assert "## Contact Playbook" in dossier_text
+        assert "## Recommended Sequence" in dossier_text
+        assert "## Method & Files" in dossier_text
+
+
+def test_export_collapses_review_only_pages_into_one_account_dossier() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        db_path = root / "provider_intel.db"
+        out_dir = root / "out"
+        con = _connect_with_schema(db_path)
+        _seed_review_only_account(con)
+        report = export_provider_intel(con, out_dir, "run-review-only", limit=10)
+        con.close()
+
+        dossiers_path = Path(str(report["dossiers_csv"]))
+        with dossiers_path.open(newline="", encoding="utf-8") as handle:
+            dossier_rows = list(csv.DictReader(handle))
+        assert len(dossier_rows) == 1
+        assert "RWJBarnabas" in dossier_rows[0]["practice_name"]
+        dossier_md = Path(dossier_rows[0]["dossier_markdown"])
+        dossier_text = dossier_md.read_text(encoding="utf-8")
+        assert "Frequently Asked Questions" not in dossier_text
+        assert "Development Evaluations" in dossier_text or "Assessment & Evaluation" in dossier_text
+        assert "Service-level evidence is present, but no named clinician is verified yet." in dossier_text
 
 
 def main() -> None:
     test_score_qa_and_export_generate_provider_outputs()
+    test_export_collapses_review_only_pages_into_one_account_dossier()
     print("test_lead_research: ok")
 
 

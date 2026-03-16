@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ DEFAULT_RUNTIME_PATHS = default_runtime_paths()
 MANIFEST_PATH = DEFAULT_RUNTIME_PATHS.manifest_path
 LOCK_PATH = DEFAULT_RUNTIME_PATHS.lock_path
 OUT_DIR = DEFAULT_RUNTIME_PATHS.provider_out_dir
-READ_ONLY_PREFIXES = ("select", "with")
+READ_ONLY_PREFIXES = ("select", "with", "pragma")
 FORBIDDEN_SQL_TERMS = ("insert", "update", "delete", "alter", "drop", "create", "replace", "attach", "detach", "vacuum", "reindex")
 
 PRESET_QUERIES = {
@@ -208,18 +209,21 @@ def run_search(*, db_path: str, query: str | None, preset: str | None, limit: in
 
 
 def run_sql(*, db_path: str, query: str, limit: int, db_timeout_ms: int | None = None) -> dict[str, Any]:
-    normalized = (query or "").strip()
+    normalized = (query or "").strip().rstrip(";").strip()
     if not normalized:
         raise DataValidationError("SQL query is required.")
     lowered = normalized.lower()
     if not lowered.startswith(READ_ONLY_PREFIXES):
-        raise DataValidationError("SQL command must start with SELECT or WITH.")
-    if any(term in lowered for term in FORBIDDEN_SQL_TERMS):
+        raise DataValidationError("SQL command must start with SELECT, WITH, or PRAGMA.")
+    if any(re.search(rf"\b{re.escape(term)}\b", lowered) for term in FORBIDDEN_SQL_TERMS):
         raise DataValidationError("SQL command must be read-only.")
 
     con = _connect_readonly(db_path, db_timeout_ms=db_timeout_ms)
     try:
-        rows = con.execute(f"SELECT * FROM ({normalized}) LIMIT ?", (limit,)).fetchall()
+        if lowered.startswith("pragma"):
+            rows = con.execute(normalized).fetchall()[:limit]
+        else:
+            rows = con.execute(f"SELECT * FROM ({normalized}) LIMIT ?", (limit,)).fetchall()
         data = [dict(row) for row in rows]
         return {"query": normalized, "row_count": len(data), "rows": data}
     finally:
