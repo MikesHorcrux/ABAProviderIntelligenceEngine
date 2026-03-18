@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.11
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -79,8 +80,63 @@ def test_session_store_and_memory_store_round_trip() -> None:
         assert len(memory.list_client_profiles()) == 1
 
 
+def test_session_store_tail_queries_return_latest_rows_in_chronological_order() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db_path = Path(td) / "agent_memory.db"
+        sessions = SessionStore(db_path)
+        session = sessions.create_session(
+            tenant_id="tenant-a",
+            goal="Tail status should show latest activity",
+            model_provider="fake",
+            model_name="fake-model",
+        )
+
+        turn_ids: list[str] = []
+        for idx in range(60):
+            turn = sessions.append_turn(
+                session["session_id"],
+                role="assistant",
+                agent_name="SupervisorAgent",
+                content=f"turn-{idx}",
+                metadata={"idx": idx},
+            )
+            turn_ids.append(turn["turn_id"])
+            sessions.record_tool_event(
+                session_id=session["session_id"],
+                tenant_id="tenant-a",
+                tool_name="status",
+                reason=f"event-{idx}",
+                input_payload={"idx": idx},
+                output_payload={"data": {"idx": idx}},
+                status="completed",
+                started_at=f"2026-03-18T00:00:{idx:02d}Z",
+                completed_at=f"2026-03-18T00:00:{idx:02d}Z",
+            )
+
+        con = sqlite3.connect(db_path)
+        for idx, turn_id in enumerate(turn_ids):
+            con.execute(
+                "UPDATE agent_turns SET created_at=? WHERE turn_id=?",
+                (f"2026-03-18T00:01:{idx:02d}Z", turn_id),
+            )
+        con.commit()
+        con.close()
+
+        latest_turns = sessions.list_turns(session["session_id"], limit=50, tail=True)
+        latest_events = sessions.list_tool_events(session["session_id"], limit=50, tail=True)
+
+        assert len(latest_turns) == 50
+        assert latest_turns[0]["content"] == "turn-10"
+        assert latest_turns[-1]["content"] == "turn-59"
+
+        assert len(latest_events) == 50
+        assert latest_events[0]["reason"] == "event-10"
+        assert latest_events[-1]["reason"] == "event-59"
+
+
 def main() -> None:
     test_session_store_and_memory_store_round_trip()
+    test_session_store_tail_queries_return_latest_rows_in_chronological_order()
     print("test_agent_memory: ok")
 
 

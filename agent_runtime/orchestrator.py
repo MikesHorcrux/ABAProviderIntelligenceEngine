@@ -130,8 +130,8 @@ class AgentOrchestrator:
         return {
             "tenant_id": tenant_id,
             "session": session,
-            "turns": self.session_store.list_turns(session["session_id"], limit=50),
-            "tool_events": self.session_store.list_tool_events(session["session_id"], limit=50),
+            "turns": self.session_store.list_turns(session["session_id"], limit=50, tail=True),
+            "tool_events": self.session_store.list_tool_events(session["session_id"], limit=50, tail=True),
             "run_memory": self.memory_store.list_run_memory(limit=20),
             "domain_tactics": self.memory_store.list_domain_tactics(limit=20),
             "client_profiles": self.memory_store.list_client_profiles(limit=20),

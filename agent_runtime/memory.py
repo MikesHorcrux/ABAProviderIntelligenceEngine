@@ -202,12 +202,22 @@ class SessionStore:
         con.close()
         return self._decode_turn(turn)
 
-    def list_turns(self, session_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+    def list_turns(self, session_id: str, *, limit: int = 100, tail: bool = False) -> list[dict[str, Any]]:
         con = _connect(self.db_path)
-        rows = con.execute(
-            "SELECT * FROM agent_turns WHERE session_id=? ORDER BY created_at ASC LIMIT ?",
-            (session_id, limit),
-        ).fetchall()
+        if tail:
+            rows = con.execute(
+                """
+                SELECT * FROM (
+                    SELECT * FROM agent_turns WHERE session_id=? ORDER BY created_at DESC LIMIT ?
+                ) ORDER BY created_at ASC
+                """,
+                (session_id, limit),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM agent_turns WHERE session_id=? ORDER BY created_at ASC LIMIT ?",
+                (session_id, limit),
+            ).fetchall()
         con.close()
         return [self._decode_turn(dict(row)) for row in rows]
 
@@ -266,12 +276,22 @@ class SessionStore:
         con.close()
         return self._decode_tool_event(event)
 
-    def list_tool_events(self, session_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+    def list_tool_events(self, session_id: str, *, limit: int = 100, tail: bool = False) -> list[dict[str, Any]]:
         con = _connect(self.db_path)
-        rows = con.execute(
-            "SELECT * FROM agent_tool_events WHERE session_id=? ORDER BY started_at ASC LIMIT ?",
-            (session_id, limit),
-        ).fetchall()
+        if tail:
+            rows = con.execute(
+                """
+                SELECT * FROM (
+                    SELECT * FROM agent_tool_events WHERE session_id=? ORDER BY started_at DESC LIMIT ?
+                ) ORDER BY started_at ASC
+                """,
+                (session_id, limit),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM agent_tool_events WHERE session_id=? ORDER BY started_at ASC LIMIT ?",
+                (session_id, limit),
+            ).fetchall()
         con.close()
         return [self._decode_tool_event(dict(row)) for row in rows]
 
