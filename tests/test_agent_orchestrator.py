@@ -256,6 +256,16 @@ def test_agent_orchestrator_can_resume_after_failed_sync() -> None:
         assert "resume" in tool_names
 
 
+def test_agent_orchestrator_snapshot_collects_nested_sync_report_exports() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        orchestrator, context = _build_orchestrator(tenant_id="tenant-d", tenant_root_base=Path(td))
+        result = orchestrator.run("Capture sync exports", context)
+        export_pairs = {(item["tool"], item["key"]) for item in result["exports"]}
+        assert ("sync", "records_csv") in export_pairs
+        assert ("sync", "review_queue_csv") in export_pairs
+        assert ("sync", "sales_report_csv") in export_pairs
+
+
 def test_agent_orchestrator_emits_trace_events() -> None:
     with tempfile.TemporaryDirectory() as td:
         events: list[dict[str, Any]] = []
@@ -304,6 +314,7 @@ def main() -> None:
     test_agent_orchestrator_runs_full_operator_loop_and_records_memory()
     test_agent_orchestrator_isolates_tenants()
     test_agent_orchestrator_can_resume_after_failed_sync()
+    test_agent_orchestrator_snapshot_collects_nested_sync_report_exports()
     test_agent_orchestrator_emits_trace_events()
     print("test_agent_orchestrator: ok")
 

@@ -247,26 +247,34 @@ class AgentOrchestrator:
         run_ids: list[str] = []
         exports: list[dict[str, Any]] = []
         domains_updated: list[str] = []
+        export_keys = (
+            "records_csv",
+            "records_json",
+            "review_queue_csv",
+            "sales_report_csv",
+            "profiles_dir",
+            "evidence_dir",
+            "outreach_dir",
+            "dossiers_dir",
+            "dossiers_csv",
+            "dossiers_json",
+        )
         for event in new_events:
             output_payload = dict(event.get("output") or {})
             data = dict(output_payload.get("data") or output_payload)
             run_id = data.get("run_id")
             if isinstance(run_id, str) and run_id and run_id not in run_ids:
                 run_ids.append(run_id)
-            for key in (
-                "records_csv",
-                "records_json",
-                "review_queue_csv",
-                "sales_report_csv",
-                "profiles_dir",
-                "evidence_dir",
-                "outreach_dir",
-                "dossiers_dir",
-                "dossiers_csv",
-                "dossiers_json",
-            ):
-                if key in data:
-                    exports.append({"tool": event["tool_name"], "key": key, "path": data[key]})
+            artifact_sources = [data]
+            nested_report = data.get("report")
+            if isinstance(nested_report, dict):
+                artifact_sources.append(nested_report)
+            for source in artifact_sources:
+                for key in export_keys:
+                    if key in source:
+                        export_item = {"tool": event["tool_name"], "key": key, "path": source[key]}
+                        if export_item not in exports:
+                            exports.append(export_item)
             if event["tool_name"] == "control_apply":
                 domain = str((event.get("input") or {}).get("domain") or "").strip()
                 if domain and domain not in domains_updated:
