@@ -5,14 +5,8 @@ import os
 import sys
 from pathlib import Path
 
-from cli.agent import execute_agent_resume, execute_agent_run, execute_agent_status
-from cli.control import run_control_apply, run_control_show
-from cli.doctor import run_doctor
 from cli.errors import ExitCode, UsageError, classify_exception
 from cli.output import emit_payload, error_payload, success_payload
-from cli.query import run_search, run_sql, run_status
-from cli.sync import execute_export, execute_init, execute_sync, execute_tail
-from pipeline.pipeline import PipelineRunner
 from runtime_context import RuntimePaths, default_runtime_paths, resolve_runtime_paths
 
 
@@ -144,8 +138,18 @@ def _extract_output_format_flags(argv: list[str]) -> tuple[list[str], str]:
 
 def _dispatch(args) -> dict[str, object]:
     if args.command == "init":
-        return execute_init(args)
+        from cli.doctor import run_init
+
+        return run_init(
+            db_path=args.db,
+            config_path=args.config,
+            run_state_dir=args.checkpoint_dir,
+            db_timeout_ms=args.db_timeout_ms,
+            runtime_paths=getattr(args, "runtime_paths", None),
+        )
     if args.command == "doctor":
+        from cli.doctor import run_doctor
+
         return run_doctor(
             db_path=args.db,
             config_path=args.config,
@@ -154,10 +158,16 @@ def _dispatch(args) -> dict[str, object]:
             runtime_paths=getattr(args, "runtime_paths", None),
         )
     if args.command == "sync":
+        from cli.sync import execute_sync
+
         return execute_sync(args)
     if args.command == "tail":
+        from cli.sync import execute_tail
+
         return execute_tail(args)
     if args.command == "status":
+        from cli.query import run_status
+
         return run_status(
             db_path=args.db,
             run_id=args.run_id,
@@ -166,6 +176,8 @@ def _dispatch(args) -> dict[str, object]:
             runtime_paths=getattr(args, "runtime_paths", None),
         )
     if args.command == "control":
+        from cli.control import run_control_apply, run_control_show
+
         if args.control_action == "show":
             return run_control_show(run_id=args.run_id, run_state_dir=args.checkpoint_dir)
         action_value = None
@@ -175,6 +187,8 @@ def _dispatch(args) -> dict[str, object]:
             action_value = args.max_pages
         return run_control_apply(run_id=args.run_id, run_state_dir=args.checkpoint_dir, action=args.control_action, domain=args.domain, value=action_value, reason=args.reason)
     if args.command == "sql":
+        from cli.query import run_sql
+
         return run_sql(
             db_path=args.db,
             query=args.query_flag or args.query or "",
@@ -182,6 +196,8 @@ def _dispatch(args) -> dict[str, object]:
             db_timeout_ms=args.db_timeout_ms,
         )
     if args.command == "search":
+        from cli.query import run_search
+
         return run_search(
             db_path=args.db,
             query=args.query,
@@ -190,8 +206,12 @@ def _dispatch(args) -> dict[str, object]:
             db_timeout_ms=args.db_timeout_ms,
         )
     if args.command == "export":
+        from cli.sync import execute_export
+
         return execute_export(args)
     if args.command == "agent":
+        from cli.agent import execute_agent_resume, execute_agent_run, execute_agent_status
+
         if args.agent_action == "run":
             return execute_agent_run(args)
         if args.agent_action == "status":

@@ -66,8 +66,8 @@ flowchart LR
 Create config, fetch-policy file, DB schema, and state directories.
 
 ```bash
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py init --json --db /tmp/provider_intel.db --config /tmp/crawler_config.json
+python provider_intel_cli.py init --json
+python provider_intel_cli.py init --json --db /tmp/provider_intel.db --config /tmp/crawler_config.json
 ```
 
 Flags:
@@ -79,8 +79,8 @@ Flags:
 Run environment and schema diagnostics.
 
 ```bash
-python3.11 provider_intel_cli.py doctor --json
-python3.11 provider_intel_cli.py doctor --json --config ./crawler_config.json
+python provider_intel_cli.py doctor --json
+python provider_intel_cli.py doctor --json --config ./crawler_config.json
 ```
 
 Checks performed in `cli/doctor.py`:
@@ -104,9 +104,9 @@ Flags:
 Run the full pipeline with checkpointing.
 
 ```bash
-python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
-python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
-python3.11 provider_intel_cli.py sync --json --resume latest
+python provider_intel_cli.py sync --json --max 10 --limit 25
+python provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
+python provider_intel_cli.py sync --json --resume latest
 ```
 
 Flags:
@@ -127,7 +127,7 @@ Flags:
 Loop `sync` on an interval for continuous operation.
 
 ```bash
-python3.11 provider_intel_cli.py tail --json --interval-seconds 600 --iterations 3 --max 5 --limit 25
+python provider_intel_cli.py tail --json --interval-seconds 600 --iterations 3 --max 5 --limit 25
 ```
 
 Additional flags:
@@ -140,8 +140,8 @@ Additional flags:
 Summarize current DB counts, last manifest, checkpoint state, run control state, output snapshots, DB metadata, and recent failures.
 
 ```bash
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py status --json --run-id 20260309-202814+0000
+python provider_intel_cli.py status --json
+python provider_intel_cli.py status --json --run-id 20260309-202814+0000
 ```
 
 Flags:
@@ -154,9 +154,9 @@ Flags:
 Search provider records by name/practice, or run built-in diagnostic presets.
 
 ```bash
-python3.11 provider_intel_cli.py search --json "cassia"
-python3.11 provider_intel_cli.py search --json --preset outreach-ready
-python3.11 provider_intel_cli.py search --json --preset contradictions --limit 50
+python provider_intel_cli.py search --json "cassia"
+python provider_intel_cli.py search --json --preset outreach-ready
+python provider_intel_cli.py search --json --preset contradictions --limit 50
 ```
 
 Presets from `cli/query.py`:
@@ -181,17 +181,17 @@ Inspect or apply bounded runtime controls for a run.
 Show current state:
 
 ```bash
-python3.11 provider_intel_cli.py control --json --run-id latest show
+python provider_intel_cli.py control --json --run-id latest show
 ```
 
 Apply controls:
 
 ```bash
-python3.11 provider_intel_cli.py control --json --run-id latest quarantine-seed --domain noisy.example --reason blocked_seed
-python3.11 provider_intel_cli.py control --json --run-id latest suppress-prefix --domain noisy.example --prefix /blog/ --reason low_value_path
-python3.11 provider_intel_cli.py control --json --run-id latest cap-domain --domain noisy.example --max-pages 2 --reason bounded_retry
-python3.11 provider_intel_cli.py control --json --run-id latest stop-domain --domain noisy.example --reason verification_noise
-python3.11 provider_intel_cli.py control --json --run-id latest clear-domain --domain noisy.example --reason reset
+python provider_intel_cli.py control --json --run-id latest quarantine-seed --domain noisy.example --reason blocked_seed
+python provider_intel_cli.py control --json --run-id latest suppress-prefix --domain noisy.example --prefix /blog/ --reason low_value_path
+python provider_intel_cli.py control --json --run-id latest cap-domain --domain noisy.example --max-pages 2 --reason bounded_retry
+python provider_intel_cli.py control --json --run-id latest stop-domain --domain noisy.example --reason verification_noise
+python provider_intel_cli.py control --json --run-id latest clear-domain --domain noisy.example --reason reset
 ```
 
 Supported control actions:
@@ -208,7 +208,7 @@ Supported control actions:
 Execute read-only SQL against the SQLite DB.
 
 ```bash
-python3.11 provider_intel_cli.py sql --json --query "SELECT provider_name_snapshot, record_confidence FROM provider_practice_records ORDER BY record_confidence DESC LIMIT 20"
+python provider_intel_cli.py sql --json --query "SELECT provider_name_snapshot, record_confidence FROM provider_practice_records ORDER BY record_confidence DESC LIMIT 20"
 ```
 
 Rules from `cli/query.py`:
@@ -228,7 +228,7 @@ Flags:
 Re-export currently approved records without re-running crawl/extract.
 
 ```bash
-python3.11 provider_intel_cli.py export --json --limit 100
+python provider_intel_cli.py export --json --limit 100
 ```
 
 Flags:
@@ -242,21 +242,21 @@ Run the tenant-scoped provider agent control plane. `agent` commands require `--
 Run a session:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme agent run --trace --goal "Find NJ providers worth outbound this week"
-python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Resume the last bounded refresh loop" --session-id sess_123 --model gpt-5
+python provider_intel_cli.py --json --tenant acme agent run --trace --goal "Find NJ providers worth outbound this week"
+python provider_intel_cli.py --json --tenant acme agent run --goal "Resume the last bounded refresh loop" --session-id sess_123 --model gpt-5
 ```
 
 Inspect a stored session:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme agent status
-python3.11 provider_intel_cli.py --json --tenant acme agent status --session-id sess_123
+python provider_intel_cli.py --json --tenant acme agent status
+python provider_intel_cli.py --json --tenant acme agent status --session-id sess_123
 ```
 
 Resume a stored session:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme agent resume --session-id sess_123
+python provider_intel_cli.py --json --tenant acme agent resume --session-id sess_123
 ```
 
 Agent runtime notes:
@@ -302,39 +302,39 @@ Error response:
 ### First bounded run
 
 ```bash
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
-python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py search --json --preset review-queue
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
+python provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
+python provider_intel_cli.py status --json
+python provider_intel_cli.py search --json --preset review-queue
 ```
 
 ### Refresh-mode bounded run
 
 ```bash
-python3.11 provider_intel_cli.py sync --json --crawl-mode refresh --max 10 --limit 25
+python provider_intel_cli.py sync --json --crawl-mode refresh --max 10 --limit 25
 ```
 
 ### Resume after a failure
 
 ```bash
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py sync --json --resume latest
+python provider_intel_cli.py status --json
+python provider_intel_cli.py sync --json --resume latest
 ```
 
 ### Inspect export-ready records
 
 ```bash
-python3.11 provider_intel_cli.py search --json --preset outreach-ready
-python3.11 provider_intel_cli.py sql --json --query "SELECT provider_name_snapshot, practice_name_snapshot, outreach_fit_score FROM provider_practice_records WHERE outreach_ready=1 ORDER BY outreach_fit_score DESC"
+python provider_intel_cli.py search --json --preset outreach-ready
+python provider_intel_cli.py sql --json --query "SELECT provider_name_snapshot, practice_name_snapshot, outreach_fit_score FROM provider_practice_records WHERE outreach_ready=1 ORDER BY outreach_fit_score DESC"
 ```
 
 ### Investigate noisy domains
 
 ```bash
-python3.11 provider_intel_cli.py search --json --preset failed-domains
-python3.11 provider_intel_cli.py search --json --preset blocked-domains
-python3.11 provider_intel_cli.py control --json --run-id latest show
+python provider_intel_cli.py search --json --preset failed-domains
+python provider_intel_cli.py search --json --preset blocked-domains
+python provider_intel_cli.py control --json --run-id latest show
 ```
 
 ## Troubleshooting By Command
