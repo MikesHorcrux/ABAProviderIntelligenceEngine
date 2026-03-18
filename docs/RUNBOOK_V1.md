@@ -11,23 +11,23 @@ This compatibility runbook now points to the authoritative docs:
 Fast path:
 
 ```bash
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
-python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
-python3.11 provider_intel_cli.py status --json
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
+python provider_intel_cli.py sync --json --max 10 --limit 25
+python provider_intel_cli.py status --json
 ```
 
 Tenant-scoped fast path:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme init
-python3.11 provider_intel_cli.py --json --tenant acme doctor
-python3.11 provider_intel_cli.py --json --tenant acme sync --max 10 --limit 25
-python3.11 provider_intel_cli.py --json --tenant acme status
+python provider_intel_cli.py --json --tenant acme init
+python provider_intel_cli.py --json --tenant acme doctor
+python provider_intel_cli.py --json --tenant acme sync --max 10 --limit 25
+python provider_intel_cli.py --json --tenant acme status
 ```
 
 Recovery path:
 
 ```bash
-python3.11 provider_intel_cli.py sync --json --resume latest
+python provider_intel_cli.py sync --json --resume latest
 ```

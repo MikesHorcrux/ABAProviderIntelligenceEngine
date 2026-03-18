@@ -53,34 +53,34 @@ Important nuance:
 Core suite:
 
 ```bash
-PYTHONPATH=$PWD python3.11 tests/test_agent_cli.py
-PYTHONPATH=$PWD python3.11 tests/test_runtime_context.py
-PYTHONPATH=$PWD python3.11 tests/test_run_state.py
-PYTHONPATH=$PWD python3.11 tests/test_fetch_config.py
-PYTHONPATH=$PWD python3.11 tests/test_agent_memory.py
-PYTHONPATH=$PWD python3.11 tests/test_agent_policy.py
-PYTHONPATH=$PWD python3.11 tests/test_openai_adapter.py
-PYTHONPATH=$PWD python3.11 tests/test_agent_orchestrator.py
-PYTHONPATH=$PWD python3.11 tests/test_cli_contracts.py
-PYTHONPATH=$PWD python3.11 tests/test_fetch_dispatch.py
-PYTHONPATH=$PWD python3.11 tests/test_parse_stage.py
-PYTHONPATH=$PWD python3.11 tests/test_resolve_stage.py
-PYTHONPATH=$PWD python3.11 tests/test_lead_research.py
+PYTHONPATH=$PWD python tests/test_agent_cli.py
+PYTHONPATH=$PWD python tests/test_runtime_context.py
+PYTHONPATH=$PWD python tests/test_run_state.py
+PYTHONPATH=$PWD python tests/test_fetch_config.py
+PYTHONPATH=$PWD python tests/test_agent_memory.py
+PYTHONPATH=$PWD python tests/test_agent_policy.py
+PYTHONPATH=$PWD python tests/test_openai_adapter.py
+PYTHONPATH=$PWD python tests/test_agent_orchestrator.py
+PYTHONPATH=$PWD python tests/test_cli_contracts.py
+PYTHONPATH=$PWD python tests/test_fetch_dispatch.py
+PYTHONPATH=$PWD python tests/test_parse_stage.py
+PYTHONPATH=$PWD python tests/test_resolve_stage.py
+PYTHONPATH=$PWD python tests/test_lead_research.py
 ```
 
 Optional local integration:
 
 ```bash
-PROVIDER_INTEL_RUN_FETCH_INTEGRATION=1 PYTHONPATH=$PWD python3.11 tests/test_fetch_integration.py
+PROVIDER_INTEL_RUN_FETCH_INTEGRATION=1 PYTHONPATH=$PWD python tests/test_fetch_integration.py
 ```
 
 CLI sanity checks:
 
 ```bash
-PYTHONPATH=$PWD python3.11 provider_intel_cli.py doctor --json
-PYTHONPATH=$PWD python3.11 provider_intel_cli.py status --json
-PYTHONPATH=$PWD python3.11 provider_intel_cli.py search --json --preset outreach-ready
-PYTHONPATH=$PWD python3.11 provider_intel_cli.py --json --tenant demo agent status
+PYTHONPATH=$PWD python provider_intel_cli.py doctor --json
+PYTHONPATH=$PWD python provider_intel_cli.py status --json
+PYTHONPATH=$PWD python provider_intel_cli.py search --json --preset outreach-ready
+PYTHONPATH=$PWD python provider_intel_cli.py --json --tenant demo agent status
 ```
 
 ## Quality Gates In Code

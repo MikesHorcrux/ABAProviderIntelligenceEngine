@@ -6,27 +6,30 @@ Last verified against commit `0c5e92b`.
 
 ### Prerequisites
 
-- Python `3.11`
+- Python `3.11` or `3.12`
 - `pip`
 - Playwright Chromium
 - Writable runtime directories under `data/` and `out/` by default, or `storage/tenants/<tenant_id>/` when `--tenant` is used
 
 ### Bootstrap
 
+If `python3.11` is not installed locally, use another supported interpreter such as `python3.12` to create the virtualenv, then use `python` after activation.
+
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-python3.11 -m pip install -r requirements.txt
-python3.11 -m playwright install chromium
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+python provider_intel_cli.py --help
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
 ```
 
 Tenant-scoped bootstrap:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme init
-python3.11 provider_intel_cli.py --json --tenant acme doctor
+python provider_intel_cli.py --json --tenant acme init
+python provider_intel_cli.py --json --tenant acme doctor
 ```
 
 Operator-friendly equivalent from the repo root:
@@ -55,13 +58,13 @@ Success criteria:
 ### Bounded run
 
 ```bash
-python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
+python provider_intel_cli.py sync --json --max 10 --limit 25
 ```
 
 Tenant-scoped bounded run:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme sync --max 10 --limit 25
+python provider_intel_cli.py --json --tenant acme sync --max 10 --limit 25
 ```
 
 ### Refresh-mode bounded run
@@ -70,19 +73,19 @@ Use this when you want the full stage sequence with smaller crawl budgets from
 the `monitor*` settings in `crawler_config.json`.
 
 ```bash
-python3.11 provider_intel_cli.py sync --json --crawl-mode refresh --max 10 --limit 25
+python provider_intel_cli.py sync --json --crawl-mode refresh --max 10 --limit 25
 ```
 
 ### Bounded live test
 
 ```bash
-python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
+python provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
 ```
 
 ### Re-export without crawling
 
 ```bash
-python3.11 provider_intel_cli.py export --json --limit 100
+python provider_intel_cli.py export --json --limit 100
 ```
 
 ### Tenant-scoped agent loop
@@ -90,8 +93,8 @@ python3.11 provider_intel_cli.py export --json --limit 100
 Use this when you want the local agent control plane to orchestrate the deterministic runtime inside one isolated client or operator workspace.
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme agent run --trace --goal "Find NJ providers worth outbound this week"
-python3.11 provider_intel_cli.py --json --tenant acme agent status
+python provider_intel_cli.py --json --tenant acme agent run --trace --goal "Find NJ providers worth outbound this week"
+python provider_intel_cli.py --json --tenant acme agent status
 ```
 
 Operator-friendly equivalent:
@@ -132,32 +135,32 @@ Useful health questions:
 ### Check current state
 
 ```bash
-python3.11 provider_intel_cli.py status --json
+python provider_intel_cli.py status --json
 ```
 
 Tenant-scoped:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme status
+python provider_intel_cli.py --json --tenant acme status
 ```
 
 ### Show run controls
 
 ```bash
-python3.11 provider_intel_cli.py control --json --run-id latest show
+python provider_intel_cli.py control --json --run-id latest show
 ```
 
 ### Suppress noisy path prefixes
 
 ```bash
-python3.11 provider_intel_cli.py control --json --run-id latest suppress-prefix --domain npino.com --prefix /faq/ --reason noisy_navigation
+python provider_intel_cli.py control --json --run-id latest suppress-prefix --domain npino.com --prefix /faq/ --reason noisy_navigation
 ```
 
 ### Cap or stop a domain
 
 ```bash
-python3.11 provider_intel_cli.py control --json --run-id latest cap-domain --domain psychologytoday.com --max-pages 2 --reason bounded_sampling
-python3.11 provider_intel_cli.py control --json --run-id latest stop-domain --domain psychologytoday.com --reason low_signal
+python provider_intel_cli.py control --json --run-id latest cap-domain --domain psychologytoday.com --max-pages 2 --reason bounded_sampling
+python provider_intel_cli.py control --json --run-id latest stop-domain --domain psychologytoday.com --reason low_signal
 ```
 
 ## Incident Response
@@ -187,14 +190,14 @@ Symptoms:
 Recovery:
 
 ```bash
-python3.11 provider_intel_cli.py sync --json --resume latest
+python provider_intel_cli.py sync --json --resume latest
 ```
 
 Tenant-scoped:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme sync --resume latest
-python3.11 provider_intel_cli.py --json --tenant acme agent resume --session-id <session_id>
+python provider_intel_cli.py --json --tenant acme sync --resume latest
+python provider_intel_cli.py --json --tenant acme agent resume --session-id <session_id>
 ```
 
 ### Schema drift or DB corruption symptoms
@@ -207,22 +210,22 @@ Symptoms:
 Recovery:
 
 ```bash
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
 ```
 
 If the DB itself is unusable, move it aside and reinitialize:
 
 ```bash
 mv data/provider_intel_v1.db data/provider_intel_v1.db.bad
-python3.11 provider_intel_cli.py init --json
+python provider_intel_cli.py init --json
 ```
 
 Tenant-scoped equivalent:
 
 ```bash
 mv storage/tenants/acme/data/provider_intel_v1.db storage/tenants/acme/data/provider_intel_v1.db.bad
-python3.11 provider_intel_cli.py --json --tenant acme init
+python provider_intel_cli.py --json --tenant acme init
 ```
 
 This is a rebuild, not an in-place rollback.
@@ -254,7 +257,7 @@ Recovery path:
 3. Query missing critical evidence:
 
 ```bash
-python3.11 provider_intel_cli.py sql --json --query "SELECT provider_name_snapshot, blocked_reason, record_confidence FROM provider_practice_records ORDER BY updated_at DESC LIMIT 25"
+python provider_intel_cli.py sql --json --query "SELECT provider_name_snapshot, blocked_reason, record_confidence FROM provider_practice_records ORDER BY updated_at DESC LIMIT 25"
 ```
 
 ## Logging

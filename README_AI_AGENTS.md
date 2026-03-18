@@ -26,15 +26,15 @@ This repository is an evidence-first provider intelligence runtime for New Jerse
 ## Canonical Commands
 
 ```bash
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
-python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py search --json --preset outreach-ready
-python3.11 provider_intel_cli.py control --json --run-id latest show
-python3.11 provider_intel_cli.py export --json --limit 100
-python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Run a bounded review and export loop"
-python3.11 provider_intel_cli.py --json --tenant acme agent status
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
+python provider_intel_cli.py sync --json --max 10 --limit 25
+python provider_intel_cli.py status --json
+python provider_intel_cli.py search --json --preset outreach-ready
+python provider_intel_cli.py control --json --run-id latest show
+python provider_intel_cli.py export --json --limit 100
+python provider_intel_cli.py --json --tenant acme agent run --goal "Run a bounded review and export loop"
+python provider_intel_cli.py --json --tenant acme agent status
 ```
 
 For human operators, the repo-local `./ae` wrapper can shorten the same

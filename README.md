@@ -64,18 +64,21 @@ The runtime is evidence-first. If a critical claim is not source-backed, QA bloc
 
 ## 5-Minute Quickstart
 
+Use Python 3.11 or 3.12 for setup. If `python3.11` is not installed on your machine, replace it with the supported interpreter you do have (for example `python3.12`). Once the virtualenv is activated, use `python` for the rest of the commands.
+
 ```bash
-git clone https://github.com/MikesHorcrux/ABAProviderIntelligenceEngine.git
+git clone https://github.com/ProjectAfterThought/ABAProviderIntelligenceEngine.git
 cd ABAProviderIntelligenceEngine
 python3.11 -m venv .venv
 source .venv/bin/activate
-python3.11 -m pip install -r requirements.txt
-python3.11 -m playwright install chromium
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
-python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py --json --tenant demo agent status
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+python provider_intel_cli.py --help
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
+python provider_intel_cli.py sync --json --max 10 --limit 25
+python provider_intel_cli.py status --json
+python provider_intel_cli.py --json --tenant demo agent status
 ```
 
 If you want a shorter human-facing wrapper from the repo root, use `./ae`. It
@@ -95,16 +98,16 @@ What to expect:
 ## Key Commands
 
 ```bash
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
-python3.11 provider_intel_cli.py sync --json --max 50 --limit 100
-python3.11 provider_intel_cli.py sync --json --resume latest
-python3.11 provider_intel_cli.py search --json --preset outreach-ready
-python3.11 provider_intel_cli.py search --json --preset review-queue
-python3.11 provider_intel_cli.py control --json --run-id latest show
-python3.11 provider_intel_cli.py export --json --limit 100
-python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Find NJ providers worth outbound this week"
-python3.11 provider_intel_cli.py --json --tenant acme agent status
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
+python provider_intel_cli.py sync --json --max 50 --limit 100
+python provider_intel_cli.py sync --json --resume latest
+python provider_intel_cli.py search --json --preset outreach-ready
+python provider_intel_cli.py search --json --preset review-queue
+python provider_intel_cli.py control --json --run-id latest show
+python provider_intel_cli.py export --json --limit 100
+python provider_intel_cli.py --json --tenant acme agent run --goal "Find NJ providers worth outbound this week"
+python provider_intel_cli.py --json --tenant acme agent status
 ./ae init --json
 ./ae run --json --tenant acme "Find NJ providers worth outbound this week"
 ./ae session-status --json --tenant acme
@@ -131,15 +134,15 @@ Minimum handoff:
 Recommended command loop for agents:
 
 ```bash
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
-python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py search --json --preset review-queue
-python3.11 provider_intel_cli.py search --json --preset outreach-ready
-python3.11 provider_intel_cli.py control --json --run-id latest show
-python3.11 provider_intel_cli.py sync --json --resume latest
-python3.11 provider_intel_cli.py export --json --limit 100
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
+python provider_intel_cli.py sync --json --max 10 --limit 25
+python provider_intel_cli.py status --json
+python provider_intel_cli.py search --json --preset review-queue
+python provider_intel_cli.py search --json --preset outreach-ready
+python provider_intel_cli.py control --json --run-id latest show
+python provider_intel_cli.py sync --json --resume latest
+python provider_intel_cli.py export --json --limit 100
 ```
 
 How the loop should be used:
@@ -207,7 +210,7 @@ public code with an excluded-entity restriction.
 Use `seed_packs/examples/cassia_live_test.json` for a bounded live test:
 
 ```bash
-python3.11 provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
+python provider_intel_cli.py sync --json --seeds seed_packs/examples/cassia_live_test.json --max 2 --limit 10
 ```
 
 ## Compatibility Note

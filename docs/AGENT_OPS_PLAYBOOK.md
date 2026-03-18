@@ -23,21 +23,21 @@ This file is the short operating contract for agents. Use the main docs set for 
 ## Canonical Flow
 
 ```bash
-python3.11 provider_intel_cli.py init --json
-python3.11 provider_intel_cli.py doctor --json
-python3.11 provider_intel_cli.py sync --json --max 10 --limit 25
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py search --json --preset review-queue
-python3.11 provider_intel_cli.py export --json --limit 100
+python provider_intel_cli.py init --json
+python provider_intel_cli.py doctor --json
+python provider_intel_cli.py sync --json --max 10 --limit 25
+python provider_intel_cli.py status --json
+python provider_intel_cli.py search --json --preset review-queue
+python provider_intel_cli.py export --json --limit 100
 ```
 
 Tenant-scoped agent flow:
 
 ```bash
-python3.11 provider_intel_cli.py --json --tenant acme init
-python3.11 provider_intel_cli.py --json --tenant acme doctor
-python3.11 provider_intel_cli.py --json --tenant acme agent run --goal "Run a bounded provider-intel loop"
-python3.11 provider_intel_cli.py --json --tenant acme agent status
+python provider_intel_cli.py --json --tenant acme init
+python provider_intel_cli.py --json --tenant acme doctor
+python provider_intel_cli.py --json --tenant acme agent run --goal "Run a bounded provider-intel loop"
+python provider_intel_cli.py --json --tenant acme agent status
 ```
 
 Runtime note:
@@ -58,8 +58,8 @@ Runtime note:
 ## First Diagnostic Commands
 
 ```bash
-python3.11 provider_intel_cli.py status --json
-python3.11 provider_intel_cli.py search --json --preset blocked-domains
-python3.11 provider_intel_cli.py search --json --preset contradictions
-python3.11 provider_intel_cli.py control --json --run-id latest show
+python provider_intel_cli.py status --json
+python provider_intel_cli.py search --json --preset blocked-domains
+python provider_intel_cli.py search --json --preset contradictions
+python provider_intel_cli.py control --json --run-id latest show
 ```
