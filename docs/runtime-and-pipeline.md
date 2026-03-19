@@ -223,6 +223,8 @@ Behavior:
 - Exports only `export_status='approved'` records
 - Writes provider CSV and JSON outputs
 - Writes `review_queue_<run_id>.csv`
+- Writes `lead_intelligence_<run_id>.csv/.json` and dossier files only for approved/exportable records
+- Keeps review-only account aggregation, when present, in distinct `internal_review_accounts_<run_id>.csv/.json` outputs
 - Writes evidence bundles and Markdown profiles
 - Writes fallback PDFs from Markdown
 - Writes sales briefs and `sales_report_<run_id>.csv` only for `outreach_ready` records
