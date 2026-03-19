@@ -227,6 +227,10 @@ Flags:
 
 Re-export currently approved records without re-running crawl/extract.
 
+The provider export emits the provider-practice `record_id` and the canonical
+`provider_id` as separate fields. `provider_id` is the stable provider identity;
+it must not be substituted with `record_id`.
+
 ```bash
 python provider_intel_cli.py export --json --limit 100
 ```
@@ -262,6 +266,7 @@ python provider_intel_cli.py --json --tenant acme agent resume --session-id sess
 Agent runtime notes:
 
 - Each tenant gets its own config, DB, checkpoints, outputs, and agent memory store.
+- `agent run --session-id`, `agent status --session-id`, and `agent resume --session-id` only accept session ids that belong to the same `--tenant`.
 - The deterministic pipeline remains the source of truth; the agent orchestrates tools around it.
 - The first model adapter targets the OpenAI Responses API, but the internal model/tool contract is provider-neutral.
 - `--trace` writes human-readable session activity to stderr so operators can watch tool calls without breaking `--json` stdout.

@@ -122,7 +122,10 @@ def execute_agent_status(args, *, model_adapter=None) -> dict[str, object]:
 def execute_agent_resume(args, *, model_adapter=None) -> dict[str, object]:
     tenant_context = _tenant_context_from_args(args)
     orchestrator = _build_orchestrator(args, model_adapter=model_adapter)
-    session = orchestrator.session_store.get_session(str(getattr(args, "session_id")))
+    session = orchestrator.session_store.get_session_for_tenant(
+        str(getattr(args, "session_id")),
+        str(getattr(args, "tenant", "") or ""),
+    )
     return orchestrator.run(
         goal=str(session.get("goal") or ""),
         tenant_context=tenant_context,

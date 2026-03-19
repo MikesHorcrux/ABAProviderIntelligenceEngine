@@ -1241,7 +1241,7 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
 
     approved_rows = con.execute(
         """
-        SELECT pr.record_id, p.provider_name, p.credentials, p.npi, pr.license_state, pr.license_type, pr.license_status,
+        SELECT pr.record_id, pr.provider_id, p.provider_name, p.credentials, p.npi, pr.license_state, pr.license_type, pr.license_status,
                pr.practice_name_snapshot AS practice_name, pl.city, pl.state, pl.metro, pl.phone, pt.website, pt.intake_url,
                pr.diagnoses_asd, pr.diagnoses_adhd, pr.prescriptive_authority, pr.prescriptive_basis, pr.age_groups_json,
                pr.telehealth, pr.insurance_notes, pr.waitlist_notes, pr.referral_requirements, pr.source_urls_json,
@@ -1259,6 +1259,7 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
     ).fetchall()
 
     fieldnames = [
+        "record_id",
         "provider_id",
         "provider_name",
         "credentials",
@@ -1297,7 +1298,8 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
         outreach_reasons = json.loads(row["outreach_reasons_json"] or "[]")
         export_rows.append(
             {
-                "provider_id": row["record_id"],
+                "record_id": row["record_id"],
+                "provider_id": row["provider_id"],
                 "provider_name": row["provider_name"],
                 "credentials": row["credentials"],
                 "npi": row["npi"],

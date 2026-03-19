@@ -116,7 +116,7 @@ class AgentOrchestrator:
             raise
 
     def status(self, session_id: str | None, *, tenant_id: str) -> dict[str, Any]:
-        session = self.session_store.get_session(session_id) if session_id else self.session_store.latest_session(tenant_id)
+        session = self.session_store.get_session_for_tenant(session_id, tenant_id) if session_id else self.session_store.latest_session(tenant_id)
         if not session:
             return {
                 "tenant_id": tenant_id,
@@ -139,7 +139,7 @@ class AgentOrchestrator:
 
     def _ensure_session(self, *, goal: str, tenant_id: str, session_id: str | None) -> dict[str, Any]:
         if session_id:
-            session = self.session_store.get_session(session_id)
+            session = self.session_store.get_session_for_tenant(session_id, tenant_id)
             return session
         return self.session_store.create_session(
             tenant_id=tenant_id,

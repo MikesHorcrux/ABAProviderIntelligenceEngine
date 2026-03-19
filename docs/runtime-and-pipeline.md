@@ -221,7 +221,7 @@ Code path:
 Behavior:
 
 - Exports only `export_status='approved'` records
-- Writes provider CSV and JSON outputs
+- Writes provider CSV and JSON outputs with both `record_id` and canonical `provider_id`
 - Writes `review_queue_<run_id>.csv`
 - Writes `lead_intelligence_<run_id>.csv/.json` and dossier files only for approved/exportable records
 - Keeps review-only account aggregation, when present, in distinct `internal_review_accounts_<run_id>.csv/.json` outputs
