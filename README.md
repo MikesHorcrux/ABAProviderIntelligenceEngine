@@ -171,11 +171,15 @@ When `--tenant <id>` is used, the same export tree is created under
 - `provider_records_<run_id>.json`
 - `review_queue_<run_id>.csv`
 - `sales_report_<run_id>.csv`
+- `lead_intelligence_<run_id>.csv`
+- `lead_intelligence_<run_id>.json`
 - `profiles/<record_id>/profile.md`
 - `profiles/<record_id>/profile.pdf`
 - `outreach/<record_id>/sales_brief.md`
 - `outreach/<record_id>/sales_brief.pdf`
 - `evidence/<record_id>.json`
+- `internal_review_accounts_<run_id>.csv`
+- `internal_review_accounts_<run_id>.json`
 
 ## Current Scope And Boundaries
 

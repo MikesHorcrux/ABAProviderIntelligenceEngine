@@ -258,6 +258,9 @@ class AgentOrchestrator:
             "dossiers_dir",
             "dossiers_csv",
             "dossiers_json",
+            "internal_review_dir",
+            "internal_review_csv",
+            "internal_review_json",
         )
         for event in new_events:
             output_payload = dict(event.get("output") or {})

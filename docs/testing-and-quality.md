@@ -89,6 +89,8 @@ The runtime already encodes some release-quality rules:
 
 - schema checksum must match `db/schema.sql`
 - export only includes `export_status='approved'`
+- lead-intelligence dossiers only include approved/exportable records
+- review-only account summaries, if generated, must stay in distinct internal-review artifacts
 - outreach artifacts only generate when `outreach_ready=1`
 - critical fields must have evidence
 - contradictions lower confidence
