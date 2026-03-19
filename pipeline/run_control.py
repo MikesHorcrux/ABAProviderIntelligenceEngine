@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,10 @@ def ensure_run_control_dir(base_dir: str | Path | None = None) -> Path:
 
 def run_control_path(run_id: str, base_dir: str | Path | None = None) -> Path:
     return ensure_run_control_dir(base_dir) / f"control_{run_id}.json"
+
+
+def run_control_lock_path(run_id: str, base_dir: str | Path | None = None) -> Path:
+    return ensure_run_control_dir(base_dir) / f"control_{run_id}.json.lock"
 
 
 def _now() -> str:
@@ -73,6 +79,10 @@ def new_run_control_state(run_id: str) -> dict[str, Any]:
 
 def load_run_control(run_id: str, base_dir: str | Path | None = None) -> dict[str, Any]:
     path = run_control_path(run_id, base_dir)
+    return _read_run_control_path(path, run_id)
+
+
+def _read_run_control_path(path: Path, run_id: str) -> dict[str, Any]:
     if not path.exists():
         return new_run_control_state(run_id)
     with path.open(encoding="utf-8") as f:
@@ -90,22 +100,53 @@ def load_run_control(run_id: str, base_dir: str | Path | None = None) -> dict[st
     return state
 
 
-def save_run_control(state: dict[str, Any], base_dir: str | Path | None = None) -> Path:
-    path = run_control_path(str(state["run_id"]), base_dir)
-    state["updated_at"] = _now()
+def _write_run_control_path(path: Path, state: dict[str, Any]) -> Path:
     tmp_path = path.with_suffix(f"{path.suffix}.tmp")
     tmp_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
     tmp_path.replace(path)
     return path
 
 
+@contextlib.contextmanager
+def _run_control_lock(run_id: str, base_dir: str | Path | None = None):
+    lock_path = run_control_lock_path(run_id, base_dir)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def save_run_control(state: dict[str, Any], base_dir: str | Path | None = None) -> Path:
+    run_id = str(state["run_id"])
+    path = run_control_path(run_id, base_dir)
+    with _run_control_lock(run_id, base_dir):
+        state["updated_at"] = _now()
+        return _write_run_control_path(path, state)
+
+
+def mutate_run_control(
+    run_id: str,
+    updater,
+    *,
+    base_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    path = run_control_path(run_id, base_dir)
+    with _run_control_lock(run_id, base_dir):
+        state = _read_run_control_path(path, run_id)
+        updater(state)
+        state["updated_at"] = _now()
+        _write_run_control_path(path, state)
+        return state
+
+
 def ensure_run_control(run_id: str, base_dir: str | Path | None = None) -> dict[str, Any]:
     path = run_control_path(run_id, base_dir)
     if path.exists():
         return load_run_control(run_id, base_dir)
-    state = new_run_control_state(run_id)
-    save_run_control(state, base_dir)
-    return state
+    return mutate_run_control(run_id, lambda state: None, base_dir=base_dir)
 
 
 def resolve_run_control_id(run_id_or_latest: str | None, base_dir: str | Path | None = None) -> str:
@@ -168,10 +209,7 @@ def update_agent_controls(
     *,
     base_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    state = ensure_run_control(run_id, base_dir)
-    updater(state)
-    save_run_control(state, base_dir)
-    return state
+    return mutate_run_control(run_id, updater, base_dir=base_dir)
 
 
 def update_runtime_controls(
@@ -180,10 +218,7 @@ def update_runtime_controls(
     *,
     base_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    state = ensure_run_control(run_id, base_dir)
-    updater(state)
-    save_run_control(state, base_dir)
-    return state
+    return mutate_run_control(run_id, updater, base_dir=base_dir)
 
 
 def finalize_run_control(
@@ -194,21 +229,21 @@ def finalize_run_control(
     replace_running_with: str | None = None,
     message: str = "",
 ) -> dict[str, Any]:
-    state = ensure_run_control(run_id, base_dir)
-    state["status"] = status
-    runtime = state.setdefault("runtime", {})
-    runtime["current_seed_domain"] = ""
-    domains = dict(runtime.get("domains") or {})
-    replacement = replace_running_with or status
-    for domain in domains:
-        record = domain_runtime_record(state, domain)
-        if record.get("status") == "running":
-            record["status"] = replacement
-            if message and not record.get("last_error"):
-                record["last_error"] = message[:240]
-            record["updated_at"] = _now()
-    save_run_control(state, base_dir)
-    return state
+    def updater(state: dict[str, Any]) -> None:
+        state["status"] = status
+        runtime = state.setdefault("runtime", {})
+        runtime["current_seed_domain"] = ""
+        domains = dict(runtime.get("domains") or {})
+        replacement = replace_running_with or status
+        for domain in domains:
+            record = domain_runtime_record(state, domain)
+            if record.get("status") == "running":
+                record["status"] = replacement
+                if message and not record.get("last_error"):
+                    record["last_error"] = message[:240]
+                record["updated_at"] = _now()
+
+    return mutate_run_control(run_id, updater, base_dir=base_dir)
 
 
 def summarize_run_control(state: dict[str, Any]) -> dict[str, Any]:

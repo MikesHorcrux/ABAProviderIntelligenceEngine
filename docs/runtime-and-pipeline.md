@@ -120,6 +120,13 @@ Outputs:
 - `seed_telemetry`
 - Runtime control updates in `control_<id>.json`
 
+Run-control persistence contract:
+
+- Live updates are serialized with a per-run file lock.
+- Runtime writers only update `runtime.*` plus top-level run status transitions.
+- Operator and agent interventions update `agent_controls.*` and append intervention entries without replacing unrelated fields.
+- Direct whole-file stale-save patterns are not part of the supported live-mutation contract.
+
 Automatic fetch interventions from `crawlee_backend.py`:
 
 - Auto-suppress a path prefix after `3` repeated failures on that prefix

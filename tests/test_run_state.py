@@ -2,11 +2,21 @@
 from __future__ import annotations
 
 import tempfile
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 from cli.sync import execute_sync
-from pipeline.run_control import ensure_run_control, finalize_run_control, load_run_control, save_run_control
+from pipeline.run_control import (
+    append_intervention,
+    ensure_run_control,
+    finalize_run_control,
+    load_run_control,
+    save_run_control,
+    update_agent_controls,
+    update_runtime_controls,
+)
 from pipeline.run_state import create_run_state, load_run_state, mark_stage_completed, mark_stage_started, next_stage, save_run_state
 from pipeline.stages.discovery import DiscoverySeed
 from pipeline.fetch_backends.common import FetchResult
@@ -188,11 +198,101 @@ def test_finalize_run_control_clears_stale_running_domain() -> None:
         assert updated["runtime"]["domains"]["demo.example"]["status"] == "failed"
 
 
+def test_competing_runtime_and_operator_updates_preserve_operator_controls_and_history() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        run_dir = Path(td)
+        ensure_run_control("run-control-race", run_dir)
+        runtime_started = threading.Event()
+        operator_finished = threading.Event()
+
+        def runtime_writer() -> None:
+            def updater(state: dict[str, object]) -> None:
+                runtime_started.set()
+                time.sleep(0.15)
+                runtime = state.setdefault("runtime", {}).setdefault("domains", {}).setdefault("demo.example", {})
+                runtime.update(
+                    {
+                        "status": "running",
+                        "processed_urls": 7,
+                        "success_pages": 4,
+                        "failure_pages": 1,
+                        "filtered_urls": 2,
+                        "last_status_code": 200,
+                        "last_error": "",
+                        "discovery_enabled": True,
+                        "browser_escalated": False,
+                        "updated_at": "2026-03-09T00:00:00Z",
+                    }
+                )
+                append_intervention(
+                    state,
+                    domain="demo.example",
+                    action="runtime_persist",
+                    reason="periodic_flush",
+                    source="auto",
+                )
+
+            update_runtime_controls("run-control-race", updater, base_dir=run_dir)
+
+        def operator_writer() -> None:
+            assert runtime_started.wait(timeout=1.0)
+
+            def updater(state: dict[str, object]) -> None:
+                controls = state.setdefault("agent_controls", {}).setdefault("domains", {}).setdefault("demo.example", {})
+                controls.update(
+                    {
+                        "quarantined": True,
+                        "quarantine_reason": "operator_hold",
+                        "suppressed_path_prefixes": ["/manual"],
+                        "max_pages_per_domain": 3,
+                        "stop_requested": True,
+                        "updated_at": "2026-03-09T00:00:01Z",
+                    }
+                )
+                append_intervention(
+                    state,
+                    domain="demo.example",
+                    action="stop-domain",
+                    reason="operator_note_do_not_override",
+                    source="agent",
+                    details={"note": "manual intervention"},
+                )
+
+            update_agent_controls("run-control-race", updater, base_dir=run_dir)
+            operator_finished.set()
+
+        runtime_thread = threading.Thread(target=runtime_writer)
+        operator_thread = threading.Thread(target=operator_writer)
+        runtime_thread.start()
+        operator_thread.start()
+        runtime_thread.join()
+        operator_thread.join()
+
+        assert operator_finished.is_set() is True
+
+        updated = load_run_control("run-control-race", run_dir)
+        controls = updated["agent_controls"]["domains"]["demo.example"]
+        runtime = updated["runtime"]["domains"]["demo.example"]
+        interventions = updated["runtime"]["interventions"]
+
+        assert controls["quarantined"] is True
+        assert controls["quarantine_reason"] == "operator_hold"
+        assert controls["suppressed_path_prefixes"] == ["/manual"]
+        assert controls["max_pages_per_domain"] == 3
+        assert controls["stop_requested"] is True
+        assert runtime["processed_urls"] == 7
+        assert runtime["status"] == "running"
+        assert [item["action"] for item in interventions] == ["runtime_persist", "stop-domain"]
+        assert interventions[-1]["reason"] == "operator_note_do_not_override"
+        assert interventions[-1]["details"] == {"note": "manual intervention"}
+
+
 def main() -> None:
     test_run_state_round_trip()
     test_execute_sync_can_resume_from_checkpoint()
     test_execute_sync_passes_refresh_mode_to_runner()
     test_finalize_run_control_clears_stale_running_domain()
+    test_competing_runtime_and_operator_updates_preserve_operator_controls_and_history()
     print("test_run_state: ok")
 
 

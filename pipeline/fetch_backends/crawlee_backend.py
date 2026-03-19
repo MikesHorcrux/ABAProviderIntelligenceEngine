@@ -41,7 +41,8 @@ from pipeline.run_control import (
     domain_runtime_record,
     ensure_run_control,
     load_run_control,
-    save_run_control,
+    update_agent_controls,
+    update_runtime_controls,
 )
 from pipeline.stages.discovery import DiscoverySeed
 from pipeline.stages.parse import extract_links
@@ -580,21 +581,22 @@ class SeedCrawlState:
         now_monotonic = time.monotonic()
         if not force and now_monotonic - self.runtime_last_persisted_at < RUNTIME_PERSIST_INTERVAL_SECONDS:
             return
-        state = self._control_state()
-        runtime = domain_runtime_record(state, self.domain)
-        if status:
-            runtime["status"] = status
-        runtime["processed_urls"] = len(self.processed_urls)
-        runtime["success_pages"] = int(self.recorder.run_success_pages)
-        runtime["failure_pages"] = int(self.recorder.run_failure_pages)
-        runtime["filtered_urls"] = int(self.filtered_urls)
-        runtime["last_status_code"] = int(self.recorder.last_status_code or 0)
-        runtime["last_error"] = self.current_error[:240]
-        runtime["discovery_enabled"] = bool(self.discovery_enabled)
-        runtime["browser_escalated"] = bool(self.browser_escalation_requested)
-        runtime["updated_at"] = utcnow_iso()
-        state.setdefault("runtime", {})["current_seed_domain"] = self.domain if runtime["status"] == "running" else ""
-        save_run_control(state, self.run_state_dir)
+        def updater(state: dict[str, Any]) -> None:
+            runtime = domain_runtime_record(state, self.domain)
+            if status:
+                runtime["status"] = status
+            runtime["processed_urls"] = len(self.processed_urls)
+            runtime["success_pages"] = int(self.recorder.run_success_pages)
+            runtime["failure_pages"] = int(self.recorder.run_failure_pages)
+            runtime["filtered_urls"] = int(self.filtered_urls)
+            runtime["last_status_code"] = int(self.recorder.last_status_code or 0)
+            runtime["last_error"] = self.current_error[:240]
+            runtime["discovery_enabled"] = bool(self.discovery_enabled)
+            runtime["browser_escalated"] = bool(self.browser_escalation_requested)
+            runtime["updated_at"] = utcnow_iso()
+            state.setdefault("runtime", {})["current_seed_domain"] = self.domain if runtime["status"] == "running" else ""
+
+        update_runtime_controls(self.job_id, updater, base_dir=self.run_state_dir)
         self.runtime_last_persisted_at = now_monotonic
 
     def _persist_intervention(
@@ -609,19 +611,20 @@ class SeedCrawlState:
         if key in self.recorded_action_keys:
             return False
         self.recorded_action_keys.add(key)
-        state = self._control_state()
-        append_intervention(
-            state,
-            domain=self.domain,
-            action=action,
-            reason=reason,
-            source=source,
-            details=details,
-        )
-        runtime = domain_runtime_record(state, self.domain)
-        runtime["last_error"] = reason
-        runtime["updated_at"] = utcnow_iso()
-        save_run_control(state, self.run_state_dir)
+        def updater(state: dict[str, Any]) -> None:
+            append_intervention(
+                state,
+                domain=self.domain,
+                action=action,
+                reason=reason,
+                source=source,
+                details=details,
+            )
+            runtime = domain_runtime_record(state, self.domain)
+            runtime["last_error"] = reason
+            runtime["updated_at"] = utcnow_iso()
+
+        update_runtime_controls(self.job_id, updater, base_dir=self.run_state_dir)
         self.logger.warning(
             "fetch_intervention",
             extra={
@@ -671,28 +674,33 @@ class SeedCrawlState:
         stop_requested: bool | None = None,
         add_suppressed_prefix: str | None = None,
     ) -> dict[str, Any]:
-        state = self._control_state()
-        record = domain_control_record(state, self.domain)
-        if quarantined is not None:
-            record["quarantined"] = bool(quarantined)
-        if quarantine_reason is not None:
-            record["quarantine_reason"] = str(quarantine_reason)
-        elif quarantined is False:
-            record["quarantine_reason"] = ""
-        if stop_requested is not None:
-            record["stop_requested"] = bool(stop_requested)
-        if add_suppressed_prefix:
-            prefixes = {
-                str(item).strip().lower()
-                for item in record.get("suppressed_path_prefixes", [])
-                if str(item).strip()
-            }
-            prefixes.add(str(add_suppressed_prefix).strip().lower())
-            record["suppressed_path_prefixes"] = sorted(prefixes)
-        record["updated_at"] = utcnow_iso()
-        save_run_control(state, self.run_state_dir)
+        updated_record: dict[str, Any] = {}
+
+        def updater(state: dict[str, Any]) -> None:
+            nonlocal updated_record
+            record = domain_control_record(state, self.domain)
+            if quarantined is not None:
+                record["quarantined"] = bool(quarantined)
+            if quarantine_reason is not None:
+                record["quarantine_reason"] = str(quarantine_reason)
+            elif quarantined is False:
+                record["quarantine_reason"] = ""
+            if stop_requested is not None:
+                record["stop_requested"] = bool(stop_requested)
+            if add_suppressed_prefix:
+                prefixes = {
+                    str(item).strip().lower()
+                    for item in record.get("suppressed_path_prefixes", [])
+                    if str(item).strip()
+                }
+                prefixes.add(str(add_suppressed_prefix).strip().lower())
+                record["suppressed_path_prefixes"] = sorted(prefixes)
+            record["updated_at"] = utcnow_iso()
+            updated_record = dict(record)
+
+        update_agent_controls(self.job_id, updater, base_dir=self.run_state_dir)
         self.refresh_controls(force=True)
-        return record
+        return updated_record
 
     def mark_processed(self, normalized_url: str) -> None:
         self.processed_urls.add(normalized_url)
@@ -743,18 +751,19 @@ class SeedCrawlState:
                 self.prefix_failure_counts[prefix] >= AUTO_SUPPRESS_PREFIX_FAILURES
                 and prefix not in self.suppressed_path_prefixes
             ):
-                state = self._control_state()
                 self._update_control_record(add_suppressed_prefix=prefix)
-                state = self._control_state()
-                append_intervention(
-                    state,
-                    domain=self.domain,
-                    action="auto_suppress_prefix",
-                    reason=f"{failure_kind}_storm",
-                    source="auto",
-                    details={"prefix": prefix, "failures": self.prefix_failure_counts[prefix]},
+                update_runtime_controls(
+                    self.job_id,
+                    lambda state: append_intervention(
+                        state,
+                        domain=self.domain,
+                        action="auto_suppress_prefix",
+                        reason=f"{failure_kind}_storm",
+                        source="auto",
+                        details={"prefix": prefix, "failures": self.prefix_failure_counts[prefix]},
+                    ),
+                    base_dir=self.run_state_dir,
                 )
-                save_run_control(state, self.run_state_dir)
                 self.recorded_action_keys.add(f"prefix:{prefix}")
                 self.logger.warning(
                     "fetch_intervention",
@@ -1591,16 +1600,18 @@ def run_fetch(
         valid_seed, seed_domain_or_reason = _is_valid_seed_domain(seed)
         if not valid_seed:
             invalid_identity = seed_domain_or_reason if "." in seed_domain_or_reason else normalize_url(seed.website)
-            state = load_run_control(job_id, run_state_dir)
-            append_intervention(
-                state,
-                domain=invalid_identity,
-                action="auto_quarantine_seed",
-                reason=f"invalid_seed:{seed_domain_or_reason}",
-                source="auto",
-                details={"seed_name": seed.name, "website": seed.website},
+            update_runtime_controls(
+                job_id,
+                lambda state: append_intervention(
+                    state,
+                    domain=invalid_identity,
+                    action="auto_quarantine_seed",
+                    reason=f"invalid_seed:{seed_domain_or_reason}",
+                    source="auto",
+                    details={"seed_name": seed.name, "website": seed.website},
+                ),
+                base_dir=run_state_dir,
             )
-            save_run_control(state, run_state_dir)
             logger.warning(
                 "Skipping invalid seed",
                 extra={
