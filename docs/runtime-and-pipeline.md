@@ -228,7 +228,7 @@ Code path:
 Behavior:
 
 - Exports only `export_status='approved'` records
-- Writes provider CSV and JSON outputs
+- Writes provider CSV and JSON outputs with both `record_id` and canonical `provider_id`
 - Writes `review_queue_<run_id>.csv`
 - Writes evidence bundles and Markdown profiles
 - Writes fallback PDFs from Markdown
