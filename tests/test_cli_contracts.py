@@ -7,7 +7,7 @@ import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 
-import cli.app as cli_app
+import cli.agent as cli_agent
 from cli.app import main as cli_main
 
 
@@ -62,7 +62,7 @@ def test_status_contract_matches_schema() -> None:
 
 
 def test_agent_run_contract_matches_schema() -> None:
-    original = cli_app.execute_agent_run
+    original = cli_agent.execute_agent_run
 
     def fake_execute_agent_run(args):  # noqa: ANN001
         del args
@@ -78,11 +78,11 @@ def test_agent_run_contract_matches_schema() -> None:
             "memory_updates": {"run_memory": ["run_123"], "domain_tactics": [], "client_profile_used": "default"},
         }
 
-    cli_app.execute_agent_run = fake_execute_agent_run
+    cli_agent.execute_agent_run = fake_execute_agent_run
     try:
         code, payload = _run_cli(["--json", "--tenant", "tenant-a", "agent", "run", "--goal", "Run a bounded operator loop"])
     finally:
-        cli_app.execute_agent_run = original
+        cli_agent.execute_agent_run = original
 
     assert code == 0
     _assert_schema_shape(payload, ROOT / "docs" / "schemas" / "cli" / "v1" / "agent_run.json")
