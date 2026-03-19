@@ -6,9 +6,14 @@ import json
 import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 
-import cli.app as cli_app
+import cli.agent as agent_cli
 from cli.app import main as cli_main
+from cli.errors import ConfigError
+from runtime_context import build_tenant_context
+from agent_runtime.memory import SessionStore
+from agent_runtime.models import ModelAdapter, ModelResponse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,7 +67,7 @@ def test_status_contract_matches_schema() -> None:
 
 
 def test_agent_run_contract_matches_schema() -> None:
-    original = cli_app.execute_agent_run
+    original = agent_cli.execute_agent_run
 
     def fake_execute_agent_run(args):  # noqa: ANN001
         del args
@@ -78,11 +83,11 @@ def test_agent_run_contract_matches_schema() -> None:
             "memory_updates": {"run_memory": ["run_123"], "domain_tactics": [], "client_profile_used": "default"},
         }
 
-    cli_app.execute_agent_run = fake_execute_agent_run
+    agent_cli.execute_agent_run = fake_execute_agent_run
     try:
         code, payload = _run_cli(["--json", "--tenant", "tenant-a", "agent", "run", "--goal", "Run a bounded operator loop"])
     finally:
-        cli_app.execute_agent_run = original
+        agent_cli.execute_agent_run = original
 
     assert code == 0
     _assert_schema_shape(payload, ROOT / "docs" / "schemas" / "cli" / "v1" / "agent_run.json")
@@ -96,10 +101,49 @@ def test_agent_status_works_without_model_credentials() -> None:
         _assert_schema_shape(payload, ROOT / "docs" / "schemas" / "cli" / "v1" / "agent_status.json")
 
 
+class _FakeModelAdapter(ModelAdapter):
+    provider_name = "fake"
+
+    def generate(self, *, agent_name: str, instructions: str, messages, tools, model: str, previous_response_id: str | None = None) -> ModelResponse:  # noqa: ANN001
+        del agent_name, instructions, messages, tools, model, previous_response_id
+        return ModelResponse(text="unused")
+
+
+def test_agent_resume_rejects_cross_tenant_session_id() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        shared_db_path = root / "shared" / "agent_memory.db"
+        tenant_b_context = build_tenant_context(tenant_id="tenant-b", tenant_root_base=root, db_path=shared_db_path)
+        session_store = SessionStore(shared_db_path)
+        session = session_store.create_session(
+            tenant_id="tenant-a",
+            goal="Resume tenant A work only",
+            model_provider="fake",
+            model_name="fake-model",
+        )
+
+        args = SimpleNamespace(
+            tenant="tenant-b",
+            runtime_paths=tenant_b_context.runtime_paths,
+            session_id=session["session_id"],
+            model=None,
+            trace=False,
+            db_timeout_ms=30000,
+        )
+
+        try:
+            agent_cli.execute_agent_resume(args, model_adapter=_FakeModelAdapter())
+        except ConfigError as exc:
+            assert str(exc) == f"Agent session not found for tenant tenant-b: {session['session_id']}"
+        else:
+            raise AssertionError("Expected agent resume to reject a session id owned by another tenant.")
+
+
 def main() -> None:
     test_status_contract_matches_schema()
     test_agent_run_contract_matches_schema()
     test_agent_status_works_without_model_credentials()
+    test_agent_resume_rejects_cross_tenant_session_id()
     print("test_cli_contracts: ok")
 
 

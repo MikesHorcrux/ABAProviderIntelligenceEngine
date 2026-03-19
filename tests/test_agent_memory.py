@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from agent_runtime.memory import MemoryStore, SessionStore
+from cli.errors import ConfigError
 
 
 def test_session_store_and_memory_store_round_trip() -> None:
@@ -134,9 +135,29 @@ def test_session_store_tail_queries_return_latest_rows_in_chronological_order() 
         assert latest_events[-1]["reason"] == "event-59"
 
 
+def test_session_store_rejects_cross_tenant_session_lookup() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db_path = Path(td) / "agent_memory.db"
+        sessions = SessionStore(db_path)
+        session = sessions.create_session(
+            tenant_id="tenant-a",
+            goal="Protect tenant-owned sessions",
+            model_provider="fake",
+            model_name="fake-model",
+        )
+
+        try:
+            sessions.get_session_for_tenant(session["session_id"], "tenant-b")
+        except ConfigError as exc:
+            assert str(exc) == f"Agent session not found for tenant tenant-b: {session['session_id']}"
+        else:
+            raise AssertionError("Expected tenant-scoped session lookup to reject mismatched tenant ownership.")
+
+
 def main() -> None:
     test_session_store_and_memory_store_round_trip()
     test_session_store_tail_queries_return_latest_rows_in_chronological_order()
+    test_session_store_rejects_cross_tenant_session_lookup()
     print("test_agent_memory: ok")
 
 

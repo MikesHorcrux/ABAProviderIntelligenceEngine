@@ -112,11 +112,25 @@ class SessionStore:
         return self.get_session(resolved_session_id)
 
     def get_session(self, session_id: str) -> dict[str, Any]:
+        return self._get_session(session_id)
+
+    def get_session_for_tenant(self, session_id: str, tenant_id: str) -> dict[str, Any]:
+        return self._get_session(session_id, tenant_id=tenant_id)
+
+    def _get_session(self, session_id: str, tenant_id: str | None = None) -> dict[str, Any]:
         con = _connect(self.db_path)
-        row = con.execute("SELECT * FROM agent_sessions WHERE session_id=?", (session_id,)).fetchone()
+        if tenant_id is None:
+            row = con.execute("SELECT * FROM agent_sessions WHERE session_id=?", (session_id,)).fetchone()
+        else:
+            row = con.execute(
+                "SELECT * FROM agent_sessions WHERE session_id=? AND tenant_id=?",
+                (session_id, tenant_id),
+            ).fetchone()
         con.close()
         if not row:
-            raise ConfigError(f"Agent session not found: {session_id}")
+            if tenant_id is None:
+                raise ConfigError(f"Agent session not found: {session_id}")
+            raise ConfigError(f"Agent session not found for tenant {tenant_id}: {session_id}")
         return self._decode_session(dict(row))
 
     def latest_session(self, tenant_id: str) -> dict[str, Any] | None:
