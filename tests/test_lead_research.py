@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -127,11 +128,19 @@ def test_score_qa_and_export_generate_provider_outputs() -> None:
         assert len(rows) == 1
         assert len(sales_rows) == 1
         assert len(dossier_rows) == 1
+        assert rows[0]["record_id"] == "rec_1"
+        assert rows[0]["provider_id"] == "prov_1"
+        assert rows[0]["provider_id"] != rows[0]["record_id"]
         assert rows[0]["provider_name"] == "Jane Smith"
         assert rows[0]["prescriptive_authority"] == "no"
         assert rows[0]["diagnoses_asd"] == "yes"
         assert rows[0]["diagnoses_adhd"] == "yes"
         assert rows[0]["outreach_ready"] == "1"
+        records_json = Path(str(report["records_json"]))
+        exported_records = json.loads(records_json.read_text(encoding="utf-8"))
+        assert exported_records[0]["record_id"] == "rec_1"
+        assert exported_records[0]["provider_id"] == "prov_1"
+        assert exported_records[0]["provider_id"] != exported_records[0]["record_id"]
         assert sales_rows[0]["target_buyer"] == "clinical director or practice owner"
         dossier_md = Path(dossier_rows[0]["dossier_markdown"])
         dossier_profiles_dir = Path(dossier_rows[0]["profiles_dir"])

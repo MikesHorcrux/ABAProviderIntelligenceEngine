@@ -227,6 +227,10 @@ Flags:
 
 Re-export currently approved records without re-running crawl/extract.
 
+The provider export emits the provider-practice `record_id` and the canonical
+`provider_id` as separate fields. `provider_id` is the stable provider identity;
+it must not be substituted with `record_id`.
+
 ```bash
 python provider_intel_cli.py export --json --limit 100
 ```
