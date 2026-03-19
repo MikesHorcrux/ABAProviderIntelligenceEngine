@@ -152,6 +152,11 @@ These are not stored in SQLite:
 - `data/state/last_run_manifest.json` by default
   Last export summary written by `pipeline/pipeline.py`
 
+`control_<id>.json` is a live coordination file. Mutations are serialized with
+per-run locking so runtime counters, operator controls, intervention history,
+and operator-entered reasons are merged from the latest on-disk state instead of
+blindly replacing the whole document.
+
 When `--tenant` is used, these move under `storage/tenants/<tenant_id>/state/`.
 
 ## Agent Memory Store
