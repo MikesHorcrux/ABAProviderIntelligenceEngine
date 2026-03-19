@@ -9,6 +9,7 @@ from agent_runtime.config import AgentConfig
 from agent_runtime.memory import MemoryStore, SessionStore
 from agent_runtime.models import ModelAdapter, ModelResponse, ToolCall, ToolDefinition
 from agent_runtime.orchestrator import AgentOrchestrator
+from cli.errors import ConfigError
 from pipeline.utils import normalize_domain, utcnow_iso
 from runtime_context import build_tenant_context
 
@@ -310,12 +311,79 @@ def test_agent_orchestrator_emits_trace_events() -> None:
         assert "session_completed" in event_types
 
 
+def test_agent_orchestrator_rejects_cross_tenant_session_ids_for_run_and_status() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        base = Path(td)
+        shared_db_path = base / "shared" / "agent_memory.db"
+        context_a = build_tenant_context(tenant_id="tenant-a", tenant_root_base=base, db_path=shared_db_path)
+        context_b = build_tenant_context(tenant_id="tenant-b", tenant_root_base=base, db_path=shared_db_path)
+        session_store = SessionStore(shared_db_path)
+        memory_store = MemoryStore(shared_db_path)
+
+        orchestrator_a = AgentOrchestrator(
+            config=AgentConfig(provider="fake", model="fake-model"),
+            model_adapter=FakeModelAdapter(
+                {
+                    "RunOpsAgent": [ModelResponse(text="RunOpsAgent complete.")],
+                    "ReviewAgent": [ModelResponse(text="Review summary.")],
+                    "ClientBriefAgent": [ModelResponse(text="Client summary.")],
+                    "SupervisorAgent": [ModelResponse(text="Supervisor summary.")],
+                }
+            ),
+            session_store=session_store,
+            memory_store=memory_store,
+            tool_registry=FakeToolRegistry(
+                tenant_id="tenant-a",
+                tenant_root=context_a.runtime_paths.tenant_root or base,
+                session_store=session_store,
+                memory_store=memory_store,
+            ),
+        )
+        orchestrator_b = AgentOrchestrator(
+            config=AgentConfig(provider="fake", model="fake-model"),
+            model_adapter=FakeModelAdapter(
+                {
+                    "RunOpsAgent": [ModelResponse(text="RunOpsAgent complete.")],
+                    "ReviewAgent": [ModelResponse(text="Review summary.")],
+                    "ClientBriefAgent": [ModelResponse(text="Client summary.")],
+                    "SupervisorAgent": [ModelResponse(text="Supervisor summary.")],
+                }
+            ),
+            session_store=session_store,
+            memory_store=memory_store,
+            tool_registry=FakeToolRegistry(
+                tenant_id="tenant-b",
+                tenant_root=context_b.runtime_paths.tenant_root or base,
+                session_store=session_store,
+                memory_store=memory_store,
+            ),
+        )
+
+        result_a = orchestrator_a.run("Tenant A goal", context_a)
+        session_id = str(result_a["session_id"])
+
+        try:
+            orchestrator_b.status(session_id, tenant_id="tenant-b")
+        except ConfigError as exc:
+            assert str(exc) == f"Agent session not found for tenant tenant-b: {session_id}"
+        else:
+            raise AssertionError("Expected status lookup to reject a session owned by another tenant.")
+
+        try:
+            orchestrator_b.run("Tenant B goal", context_b, session_id=session_id)
+        except ConfigError as exc:
+            assert str(exc) == f"Agent session not found for tenant tenant-b: {session_id}"
+        else:
+            raise AssertionError("Expected run(session_id=...) to reject a session owned by another tenant.")
+
+
 def main() -> None:
     test_agent_orchestrator_runs_full_operator_loop_and_records_memory()
     test_agent_orchestrator_isolates_tenants()
     test_agent_orchestrator_can_resume_after_failed_sync()
     test_agent_orchestrator_snapshot_collects_nested_sync_report_exports()
     test_agent_orchestrator_emits_trace_events()
+    test_agent_orchestrator_rejects_cross_tenant_session_ids_for_run_and_status()
     print("test_agent_orchestrator: ok")
 
 
