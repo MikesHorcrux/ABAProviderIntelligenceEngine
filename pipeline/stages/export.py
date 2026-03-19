@@ -907,6 +907,137 @@ def _lead_dossier_markdown(dossier: dict[str, object]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _internal_review_summary_markdown(summary: dict[str, object]) -> str:
+    lines = [
+        f"# Internal Review Account Summary - {summary['practice_name']}",
+        "",
+        "## Review Status",
+        f"- State: {_display_qa_state(summary['qa_state'])}",
+        f"- Confidence: {summary['confidence_score']}/100",
+        f"- Service focus: {summary['service_focus']}",
+        f"- Named providers verified: {summary['provider_count']}",
+        "",
+        "## Why This Account Is Still Internal",
+    ]
+    for note in list(summary.get("review_notes") or []):
+        lines.append(f"- {note}")
+    if not list(summary.get("review_notes") or []):
+        lines.append("- Public service signals exist, but this account has not crossed the export gate.")
+    lines.extend(["", "## Public Signals"])
+    for signal in list(summary.get("operating_signals") or []):
+        lines.append(f"- {signal}")
+    if not list(summary.get("operating_signals") or []):
+        lines.append("- No operating signals captured.")
+    lines.extend(["", "## Evidence In Hand"])
+    for quote in list(summary.get("evidence_quotes") or []):
+        lines.append(f"- {quote}")
+    if not list(summary.get("evidence_quotes") or []):
+        lines.append("- Review the linked source pages directly.")
+    lines.extend(["", "## Evidence Links"])
+    for url in list(summary.get("evidence_links") or []):
+        lines.append(f"- {url}")
+    if not list(summary.get("evidence_links") or []):
+        lines.append("- No evidence links captured.")
+    return "\n".join(lines).strip() + "\n"
+
+
+def _approved_dossier_candidates(con: sqlite3.Connection, *, limit: int) -> list[dict[str, object]]:
+    return [
+        dict(row)
+        for row in con.execute(
+            """
+            SELECT pr.record_id, pr.practice_id, pr.location_id, pr.provider_name_snapshot, pr.practice_name_snapshot,
+                   pr.license_state, pr.license_type, pr.license_status, pr.diagnoses_asd, pr.diagnoses_adhd,
+                   pr.prescriptive_authority, pr.prescriptive_basis, pr.telehealth, pr.insurance_notes,
+                   pr.waitlist_notes, pr.referral_requirements, pr.source_urls_json, pr.field_confidence_json,
+                   pr.record_confidence, pr.outreach_fit_score, pr.outreach_ready, pr.review_status, pr.export_status,
+                   pr.blocked_reason, pr.conflict_note, pr.last_verified_at,
+                   p.provider_name, p.credentials,
+                   pt.website, pt.intake_url, COALESCE(pl.phone, pt.phone, '') AS phone,
+                   pl.city, pl.state AS location_state, pl.metro
+            FROM provider_practice_records pr
+            LEFT JOIN providers p ON p.provider_id = pr.provider_id
+            INNER JOIN practices pt ON pt.practice_id = pr.practice_id
+            INNER JOIN practice_locations pl ON pl.location_id = pr.location_id
+            WHERE pr.export_status='approved'
+            ORDER BY pr.outreach_fit_score DESC, pr.record_confidence DESC, pr.practice_name_snapshot ASC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    ]
+
+
+def _internal_review_groups(
+    con: sqlite3.Connection,
+    *,
+    review_rows: list[dict[str, object]],
+    limit: int,
+) -> dict[str, list[dict[str, object]]]:
+    grouped_candidates: dict[str, list[dict[str, object]]] = defaultdict(list)
+    seen_group_sources: set[tuple[str, str]] = set()
+    for review_row in review_rows[: max(limit * 4, 20)]:
+        review_type = str(review_row.get("review_type") or "").strip()
+        practice_name = str(review_row.get("practice_name") or "").strip()
+        source_url = str(review_row.get("source_url") or "").strip()
+        if review_type not in {"missing_provider", "practice_only_signal"} or not practice_name or not source_url:
+            continue
+        review_priority = _review_signal_priority(practice_name, source_url)
+        if review_priority < 8:
+            continue
+        review_group_key = f"review-only:{_safe_slug(_review_account_key(source_url))}"
+        if (review_group_key, source_url) in seen_group_sources:
+            continue
+        extracted_matches = [
+            dict(row)
+            for row in con.execute(
+                """
+                SELECT practice_name, source_url, phone, intake_url, city, state, metro, diagnoses_asd, diagnoses_adhd,
+                       referral_requirements, insurance_notes
+                FROM extracted_records
+                WHERE source_url=?
+                """,
+                (source_url,),
+            )
+        ]
+        if not extracted_matches:
+            continue
+        seen_group_sources.add((review_group_key, source_url))
+        for match in extracted_matches:
+            grouped_candidates[review_group_key].append(
+                {
+                    "record_id": "",
+                    "practice_id": review_group_key,
+                    "provider_name": "",
+                    "provider_name_snapshot": "",
+                    "practice_name": practice_name,
+                    "practice_name_snapshot": practice_name,
+                    "website": source_url,
+                    "source_url": source_url,
+                    "intake_url": str(match.get("intake_url") or "").strip(),
+                    "phone": str(match.get("phone") or "").strip(),
+                    "city": str(match.get("city") or "").strip(),
+                    "location_state": str(match.get("state") or "").strip(),
+                    "metro": str(match.get("metro") or "").strip(),
+                    "diagnoses_asd": str(match.get("diagnoses_asd") or "unclear"),
+                    "diagnoses_adhd": str(match.get("diagnoses_adhd") or "unclear"),
+                    "referral_requirements": str(match.get("referral_requirements") or "").strip(),
+                    "insurance_notes": str(match.get("insurance_notes") or "").strip(),
+                    "telehealth": "unknown",
+                    "record_confidence": 0.18 if review_type == "practice_only_signal" else 0.22,
+                    "outreach_fit_score": 0.24 if str(match.get("diagnoses_asd") or "unclear") == "yes" else 0.16,
+                    "outreach_ready": 0,
+                    "review_status": "queued",
+                    "export_status": "review_only",
+                    "blocked_reason": str(review_row.get("reason") or "").strip(),
+                    "source_urls_json": json.dumps([source_url]),
+                    "credentials": "",
+                    "_review_priority": review_priority,
+                }
+            )
+    return grouped_candidates
+
+
 def _markdown_to_html(markdown: str) -> str:
     html_lines = [
         "<html><head><meta charset='utf-8'><style>",
@@ -1091,16 +1222,22 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
     sales_path = root / f"sales_report_{run_id}.csv"
     dossiers_csv_path = root / f"lead_intelligence_{run_id}.csv"
     dossiers_json_path = root / f"lead_intelligence_{run_id}.json"
+    internal_review_csv_path = root / f"internal_review_accounts_{run_id}.csv"
+    internal_review_json_path = root / f"internal_review_accounts_{run_id}.json"
     profiles_dir = root / "profiles"
     evidence_dir = root / "evidence"
     outreach_dir = root / "outreach"
     dossiers_dir = root / "dossiers" / run_id
+    internal_review_dir = root / "internal_review" / run_id
     profiles_dir.mkdir(parents=True, exist_ok=True)
     evidence_dir.mkdir(parents=True, exist_ok=True)
     outreach_dir.mkdir(parents=True, exist_ok=True)
     if dossiers_dir.exists():
         shutil.rmtree(dossiers_dir)
     dossiers_dir.mkdir(parents=True, exist_ok=True)
+    if internal_review_dir.exists():
+        shutil.rmtree(internal_review_dir)
+    internal_review_dir.mkdir(parents=True, exist_ok=True)
 
     approved_rows = con.execute(
         """
@@ -1281,108 +1418,10 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
         writer.writeheader()
         writer.writerows(review_rows)
 
-    dossier_candidate_rows = [
-        dict(row)
-        for row in con.execute(
-            """
-            SELECT pr.record_id, pr.practice_id, pr.location_id, pr.provider_name_snapshot, pr.practice_name_snapshot,
-                   pr.license_state, pr.license_type, pr.license_status, pr.diagnoses_asd, pr.diagnoses_adhd,
-                   pr.prescriptive_authority, pr.prescriptive_basis, pr.telehealth, pr.insurance_notes,
-                   pr.waitlist_notes, pr.referral_requirements, pr.source_urls_json, pr.field_confidence_json,
-                   pr.record_confidence, pr.outreach_fit_score, pr.outreach_ready, pr.review_status, pr.export_status,
-                   pr.blocked_reason, pr.conflict_note, pr.last_verified_at,
-                   p.provider_name, p.credentials,
-                   pt.website, pt.intake_url, COALESCE(pl.phone, pt.phone, '') AS phone,
-                   pl.city, pl.state AS location_state, pl.metro
-            FROM provider_practice_records pr
-            LEFT JOIN providers p ON p.provider_id = pr.provider_id
-            INNER JOIN practices pt ON pt.practice_id = pr.practice_id
-            INNER JOIN practice_locations pl ON pl.location_id = pr.location_id
-            WHERE pr.review_status IN ('ready', 'queued')
-            ORDER BY pr.outreach_fit_score DESC, pr.record_confidence DESC, pr.practice_name_snapshot ASC
-            LIMIT ?
-            """,
-            (max(limit * 3, 15),),
-        )
-    ]
-    reviews_by_record: dict[str, list[dict[str, object]]] = defaultdict(list)
-    reviews_by_source: dict[str, list[dict[str, object]]] = defaultdict(list)
-    for review_row in review_rows:
-        record_id = str(review_row.get("record_id") or "").strip()
-        if record_id:
-            reviews_by_record[record_id].append(review_row)
-        source_url = str(review_row.get("source_url") or "").strip()
-        if source_url:
-            reviews_by_source[source_url].append(review_row)
-
+    dossier_candidate_rows = _approved_dossier_candidates(con, limit=max(limit * 3, 15))
     grouped_candidates: dict[str, list[dict[str, object]]] = defaultdict(list)
     for row in dossier_candidate_rows:
         grouped_candidates[str(row.get("practice_id") or row.get("practice_name_snapshot") or row.get("record_id") or "")].append(row)
-
-    existing_practice_names = {
-        str(rows[0].get("practice_name_snapshot") or rows[0].get("practice_name") or "").strip().lower()
-        for rows in grouped_candidates.values()
-        if rows
-    }
-    for review_row in review_rows:
-        review_type = str(review_row.get("review_type") or "").strip()
-        practice_name = str(review_row.get("practice_name") or "").strip()
-        source_url = str(review_row.get("source_url") or "").strip()
-        if review_type not in {"missing_provider", "practice_only_signal"} or not practice_name or not source_url:
-            continue
-        review_priority = _review_signal_priority(practice_name, source_url)
-        if review_priority < 8:
-            continue
-        review_group_key = f"review-only:{_safe_slug(_review_account_key(source_url))}"
-        if practice_name.lower() in existing_practice_names and review_group_key not in grouped_candidates:
-            continue
-        extracted_matches = [
-            dict(row)
-            for row in con.execute(
-                """
-                SELECT practice_name, source_url, phone, intake_url, city, state, metro, diagnoses_asd, diagnoses_adhd,
-                       referral_requirements, insurance_notes
-                FROM extracted_records
-                WHERE source_url=?
-                """,
-                (source_url,),
-            )
-        ]
-        if not extracted_matches:
-            continue
-        for match in extracted_matches:
-            grouped_candidates[review_group_key].append(
-                {
-                    "record_id": "",
-                    "practice_id": review_group_key,
-                    "provider_name": "",
-                    "provider_name_snapshot": "",
-                    "practice_name": practice_name,
-                    "practice_name_snapshot": practice_name,
-                    "website": source_url,
-                    "source_url": source_url,
-                    "intake_url": str(match.get("intake_url") or "").strip(),
-                    "phone": str(match.get("phone") or "").strip(),
-                    "city": str(match.get("city") or "").strip(),
-                    "location_state": str(match.get("state") or "").strip(),
-                    "metro": str(match.get("metro") or "").strip(),
-                    "diagnoses_asd": str(match.get("diagnoses_asd") or "unclear"),
-                    "diagnoses_adhd": str(match.get("diagnoses_adhd") or "unclear"),
-                    "referral_requirements": str(match.get("referral_requirements") or "").strip(),
-                    "insurance_notes": str(match.get("insurance_notes") or "").strip(),
-                    "telehealth": "unknown",
-                    "record_confidence": 0.18 if review_type == "practice_only_signal" else 0.22,
-                    "outreach_fit_score": 0.24 if str(match.get("diagnoses_asd") or "unclear") == "yes" else 0.16,
-                    "outreach_ready": 0,
-                    "review_status": "queued",
-                    "export_status": "review_only",
-                    "blocked_reason": str(review_row.get("reason") or "").strip(),
-                    "source_urls_json": json.dumps([source_url]),
-                    "credentials": "",
-                    "_review_priority": review_priority,
-                }
-            )
-        existing_practice_names.add(practice_name.lower())
 
     dossier_rows: list[dict[str, object]] = []
     for group_rows in grouped_candidates.values():
@@ -1394,29 +1433,10 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
                 str(row.get("practice_name") or row.get("practice_name_snapshot") or ""),
             )
         )
-        group_reviews: list[dict[str, object]] = []
-        for row in group_rows:
-            group_reviews.extend(reviews_by_record.get(str(row.get("record_id") or ""), []))
-            source_url = _normalized_source_url(row.get("source_urls_json"), row.get("source_url"))
-            group_reviews.extend(reviews_by_source.get(source_url, []))
-        deduped_reviews: dict[str, dict[str, object]] = {}
-        for review in group_reviews:
-            review_id = str(review.get("review_id") or "")
-            deduped_reviews[review_id or json.dumps(review, sort_keys=True, default=str)] = review
-        group_reviews = list(deduped_reviews.values())
-        review_types = {str(item.get("review_type") or "") for item in group_reviews if str(item.get("review_type") or "")}
-        if review_types and review_types.issubset({"directory_sludge", "weak_provider_signal"}) and not any(
-            str(row.get("export_status") or "") == "approved" for row in group_rows
-        ):
-            continue
-
         primary_row = group_rows[0]
-        if str(primary_row.get("record_id") or "").strip():
-            primary_bundle = _bundle(con, str(primary_row.get("record_id") or ""))
-        else:
-            primary_bundle = _review_only_bundle(primary_row)
+        primary_bundle = _bundle(con, str(primary_row.get("record_id") or ""))
         source_briefs = _source_briefs(con, _evidence_links(group_rows, primary_bundle))
-        dossier = _dossier_bundle(rows=group_rows, reviews=group_reviews, primary_bundle=primary_bundle, source_briefs=source_briefs)
+        dossier = _dossier_bundle(rows=group_rows, reviews=[], primary_bundle=primary_bundle, source_briefs=source_briefs)
         dossier_id = f"{str(primary_row.get('practice_id') or primary_row.get('record_id') or '').strip()}-{_safe_slug(str(dossier['practice_name']))}"
         dossier_dir = dossiers_dir / dossier_id
         dossier_dir.mkdir(parents=True, exist_ok=True)
@@ -1494,6 +1514,93 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
             writer.writerow(flattened)
     dossiers_json_path.write_text(json.dumps(dossier_rows, indent=2, default=str), encoding="utf-8")
 
+    reviews_by_source: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for review_row in review_rows:
+        source_url = str(review_row.get("source_url") or "").strip()
+        if source_url:
+            reviews_by_source[source_url].append(review_row)
+
+    internal_review_rows: list[dict[str, object]] = []
+    for group_rows in _internal_review_groups(con, review_rows=review_rows, limit=limit).values():
+        group_rows.sort(
+            key=lambda row: (
+                -int(row.get("_review_priority") or 0),
+                -float(row.get("outreach_fit_score") or 0.0),
+                -float(row.get("record_confidence") or 0.0),
+                str(row.get("practice_name") or row.get("practice_name_snapshot") or ""),
+            )
+        )
+        group_reviews: list[dict[str, object]] = []
+        for row in group_rows:
+            source_url = _normalized_source_url(row.get("source_urls_json"), row.get("source_url"))
+            group_reviews.extend(reviews_by_source.get(source_url, []))
+        deduped_reviews: dict[str, dict[str, object]] = {}
+        for review in group_reviews:
+            review_id = str(review.get("review_id") or "")
+            deduped_reviews[review_id or json.dumps(review, sort_keys=True, default=str)] = review
+        group_reviews = list(deduped_reviews.values())
+        if not group_reviews:
+            continue
+        primary_row = group_rows[0]
+        primary_bundle = _review_only_bundle(primary_row)
+        source_briefs = _source_briefs(con, _evidence_links(group_rows, primary_bundle))
+        summary = _dossier_bundle(rows=group_rows, reviews=group_reviews, primary_bundle=primary_bundle, source_briefs=source_briefs)
+        summary_id = f"{str(primary_row.get('practice_id') or primary_row.get('record_id') or '').strip()}-{_safe_slug(str(summary['practice_name']))}"
+        summary_dir = internal_review_dir / summary_id
+        summary_dir.mkdir(parents=True, exist_ok=True)
+        summary_markdown = _internal_review_summary_markdown(summary)
+        summary_md_path = summary_dir / "internal_review_summary.md"
+        summary_pdf_path = summary_dir / "internal_review_summary.pdf"
+        summary_json_path = summary_dir / "internal_review_summary.json"
+        summary_md_path.write_text(summary_markdown, encoding="utf-8")
+        _write_pdf(summary_markdown, summary_pdf_path)
+        summary_json_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        internal_review_rows.append(
+            {
+                "account_id": summary_id,
+                "practice_name": summary["practice_name"],
+                "city": summary["city"],
+                "state": summary["state"],
+                "metro": summary["metro"],
+                "qa_state": summary["qa_state"],
+                "confidence_score": summary["confidence_score"],
+                "service_focus": summary["service_focus"],
+                "website": summary["website"],
+                "intake_url": summary["intake_url"],
+                "phone": summary["phone"],
+                "summary_markdown": str(summary_md_path),
+                "summary_pdf": str(summary_pdf_path),
+                "summary_json": str(summary_json_path),
+                "source_urls": list(summary.get("evidence_links") or []),
+            }
+        )
+
+    internal_review_fieldnames = [
+        "account_id",
+        "practice_name",
+        "city",
+        "state",
+        "metro",
+        "qa_state",
+        "confidence_score",
+        "service_focus",
+        "website",
+        "intake_url",
+        "phone",
+        "summary_markdown",
+        "summary_pdf",
+        "summary_json",
+        "source_urls",
+    ]
+    with internal_review_csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=internal_review_fieldnames)
+        writer.writeheader()
+        for row in internal_review_rows:
+            flattened = dict(row)
+            flattened["source_urls"] = json.dumps(flattened["source_urls"])
+            writer.writerow(flattened)
+    internal_review_json_path.write_text(json.dumps(internal_review_rows, indent=2, default=str), encoding="utf-8")
+
     return {
         "records_csv": str(records_path),
         "records_json": str(json_path),
@@ -1501,12 +1608,16 @@ def export_provider_intel(con: sqlite3.Connection, out_dir: Path, run_id: str, l
         "sales_report_csv": str(sales_path),
         "dossiers_csv": str(dossiers_csv_path),
         "dossiers_json": str(dossiers_json_path),
+        "internal_review_csv": str(internal_review_csv_path),
+        "internal_review_json": str(internal_review_json_path),
         "profiles_dir": str(profiles_dir),
         "evidence_dir": str(evidence_dir),
         "outreach_dir": str(outreach_dir),
         "dossiers_dir": str(dossiers_dir),
+        "internal_review_dir": str(internal_review_dir),
         "record_count": len(export_rows),
         "sales_count": len(sales_rows),
         "review_count": len(review_rows),
         "dossier_count": len(dossier_rows),
+        "internal_review_count": len(internal_review_rows),
     }
